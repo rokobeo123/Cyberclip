@@ -238,27 +238,32 @@ class ClipItemWidget(QWidget):
         self._content_widgets.append(self.full_content_label)
 
     def _setup_image_content(self, layout):
-        # Compact thumbnail preview
+        # Thumbnail preview — scale to fill width, no black padding
         self.thumb_label = QLabel()
-        self.thumb_label.setMinimumHeight(32)
-        self.thumb_label.setMaximumHeight(56)
-        self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.thumb_label.setStyleSheet(
-            "border-radius: 6px; border: 1px solid rgba(255,255,255,0.08); "
-            "background: rgba(0,0,0,0.2); padding: 2px;"
+            "border-radius: 6px; border: 1px solid rgba(255,255,255,0.08); padding: 0px;"
         )
+        self.thumb_label.setScaledContents(False)
 
         pix = None
         if os.path.exists(self.item.image_path):
             pix = QPixmap(self.item.image_path)
             if not pix.isNull():
-                scaled = pix.scaled(
-                    280, 50,
-                    Qt.AspectRatioMode.KeepAspectRatio,
+                # Scale to fill available width, keep aspect ratio
+                scaled = pix.scaledToWidth(
+                    320,
                     Qt.TransformationMode.SmoothTransformation
                 )
+                # Cap height at 80px for compact view
+                if scaled.height() > 80:
+                    scaled = pix.scaled(
+                        320, 80,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation
+                    )
                 self.thumb_label.setPixmap(scaled)
-                self.thumb_label.setFixedHeight(min(scaled.height() + 6, 56))
+                self.thumb_label.setFixedHeight(scaled.height())
         layout.addWidget(self.thumb_label)
         self._content_widgets.append(self.thumb_label)
 
@@ -436,7 +441,6 @@ class ClipItemWidget(QWidget):
         )
         menu.addAction(t("ctx_start_here"), lambda: self.start_from_here.emit(self.item))
         menu.addSeparator()
-        menu.addAction(t("ctx_paste"), lambda: self.paste_requested.emit(self.item))
         menu.addAction(t("ctx_copy"), lambda: self._copy_to_clipboard())
         menu.addAction(t("ctx_pin"), lambda: self.pin_toggled.emit(self.item))
 
