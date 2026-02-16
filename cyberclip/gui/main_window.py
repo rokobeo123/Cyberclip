@@ -162,26 +162,24 @@ class MainWindow(QMainWindow):
         tb_layout.addWidget(self.ghost_indicator)
 
         # Title buttons
-        settings_btn = QPushButton(self.ICON_SETTINGS)
-        settings_btn.setObjectName("TitleButton")
-        settings_btn.setFixedSize(32, 28)
-        settings_btn.setToolTip("Cài đặt")
-        settings_btn.clicked.connect(self._open_settings)
-        tb_layout.addWidget(settings_btn)
+        self._settings_btn = QPushButton(self.ICON_SETTINGS)
+        self._settings_btn.setObjectName("TitleButton")
+        self._settings_btn.setFixedSize(32, 28)
+        self._settings_btn.setToolTip(t("settings"))
+        self._settings_btn.clicked.connect(self._open_settings)
+        tb_layout.addWidget(self._settings_btn)
 
-        min_btn = QPushButton(self.ICON_MINIMIZE)
-        min_btn.setObjectName("TitleButton")
-        min_btn.setFixedSize(32, 28)
-        min_btn.setToolTip("Thu nhỏ")
-        min_btn.clicked.connect(self._minimize_to_tray)
-        tb_layout.addWidget(min_btn)
+        self._min_btn = QPushButton(self.ICON_MINIMIZE)
+        self._min_btn.setObjectName("TitleButton")
+        self._min_btn.setFixedSize(32, 28)
+        self._min_btn.clicked.connect(self._minimize_to_tray)
+        tb_layout.addWidget(self._min_btn)
 
-        close_btn = QPushButton(self.ICON_CLOSE)
-        close_btn.setObjectName("CloseButton")
-        close_btn.setFixedSize(32, 28)
-        close_btn.setToolTip("Đóng")
-        close_btn.clicked.connect(self._minimize_to_tray)
-        tb_layout.addWidget(close_btn)
+        self._close_btn = QPushButton(self.ICON_CLOSE)
+        self._close_btn.setObjectName("CloseButton")
+        self._close_btn.setFixedSize(32, 28)
+        self._close_btn.clicked.connect(self._minimize_to_tray)
+        tb_layout.addWidget(self._close_btn)
 
         main_layout.addWidget(title_bar)
 
@@ -197,7 +195,7 @@ class MainWindow(QMainWindow):
 
         self.search_bar = QLineEdit()
         self.search_bar.setObjectName("SearchBar")
-        self.search_bar.setPlaceholderText("Tìm kiếm lịch sử…")
+        self.search_bar.setPlaceholderText(t("search_placeholder"))
         self.search_bar.textChanged.connect(self._on_search)
         self.search_bar.setFixedHeight(34)
 
@@ -222,7 +220,7 @@ class MainWindow(QMainWindow):
         self.mode_btn = QPushButton(self.ICON_FIFO + "  FIFO")
         self.mode_btn.setObjectName("ToolButton")
         self.mode_btn.setCheckable(True)
-        self.mode_btn.setToolTip("Chuyển FIFO/LIFO")
+        self.mode_btn.setToolTip(t("picking_style"))
         self.mode_btn.clicked.connect(self._toggle_mode)
         tb2_layout.addWidget(self.mode_btn)
 
@@ -231,7 +229,7 @@ class MainWindow(QMainWindow):
         self.strip_btn.setObjectName("ToolButton")
         self.strip_btn.setCheckable(True)
         self.strip_btn.setChecked(self.settings.strip_formatting)
-        self.strip_btn.setToolTip("Xóa định dạng khi dán")
+        self.strip_btn.setToolTip(t("strip_formatting"))
         self.strip_btn.clicked.connect(self._toggle_strip)
         tb2_layout.addWidget(self.strip_btn)
 
@@ -240,18 +238,18 @@ class MainWindow(QMainWindow):
         self.enter_btn.setObjectName("ToolButton")
         self.enter_btn.setCheckable(True)
         self.enter_btn.setChecked(self.settings.auto_enter)
-        self.enter_btn.setToolTip("Tự động nhấn Enter sau dán")
+        self.enter_btn.setToolTip(t("auto_enter"))
         self.enter_btn.clicked.connect(self._toggle_auto_enter)
         tb2_layout.addWidget(self.enter_btn)
 
         tb2_layout.addStretch()
 
         # Reset queue button
-        reset_btn = QPushButton("\uf0e2")  # rotate-left icon
-        reset_btn.setObjectName("ToolButton")
-        reset_btn.setToolTip(t("reset_queue"))
-        reset_btn.clicked.connect(self._reset_magazine)
-        tb2_layout.addWidget(reset_btn)
+        self._reset_btn = QPushButton("\uf0e2")  # rotate-left icon
+        self._reset_btn.setObjectName("ToolButton")
+        self._reset_btn.setToolTip(t("reset_queue"))
+        self._reset_btn.clicked.connect(self._reset_magazine)
+        tb2_layout.addWidget(self._reset_btn)
 
         # Pinned filter
         self.pin_filter_btn = QPushButton(self.ICON_PIN_MENU)
@@ -265,7 +263,7 @@ class MainWindow(QMainWindow):
         self._all_collapsed = False
         self.collapse_all_btn = QPushButton(self.ICON_EXPAND_ALL)
         self.collapse_all_btn.setObjectName("ToolButton")
-        self.collapse_all_btn.setToolTip("Mở rộng tất cả")
+        self.collapse_all_btn.setToolTip(t("expand_all"))
         self.collapse_all_btn.clicked.connect(self._toggle_collapse_all)
         tb2_layout.addWidget(self.collapse_all_btn)
 
@@ -279,12 +277,12 @@ class MainWindow(QMainWindow):
         tb2_layout.addWidget(self.ghost_btn)
 
         # Clear button
-        clear_btn = QPushButton(self.ICON_CLEAR)
-        clear_btn.setObjectName("ToolButton")
-        clear_btn.setProperty("danger", True)
-        clear_btn.setToolTip("Xóa mục chưa ghim")
-        clear_btn.clicked.connect(self._clear_tab)
-        tb2_layout.addWidget(clear_btn)
+        self._clear_btn = QPushButton(self.ICON_CLEAR)
+        self._clear_btn.setObjectName("ToolButton")
+        self._clear_btn.setProperty("danger", True)
+        self._clear_btn.setToolTip(t("clear_tab"))
+        self._clear_btn.clicked.connect(self._clear_tab)
+        tb2_layout.addWidget(self._clear_btn)
 
         main_layout.addWidget(toolbar)
 
@@ -315,10 +313,10 @@ class MainWindow(QMainWindow):
         empty_icon.setObjectName("EmptyIcon")
         empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(empty_icon)
-        empty_text = QLabel("Chưa có mục nào\nSao chép gì đó để bắt đầu")
-        empty_text.setObjectName("EmptyState")
-        empty_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_layout.addWidget(empty_text)
+        self._empty_text = QLabel(t("empty_title") + "\n" + t("empty_subtitle"))
+        self._empty_text.setObjectName("EmptyState")
+        self._empty_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        empty_layout.addWidget(self._empty_text)
         self.list_layout.addWidget(self.empty_widget)
 
         # ── Status Bar ──
@@ -715,7 +713,7 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(ClipboardItem)
     def _ocr_item(self, item: ClipboardItem):
-        self.status_label.setText("Đang quét văn bản (OCR)…")
+        self.status_label.setText(t("ocr_scanning"))
         QTimer.singleShot(100, lambda: self._do_ocr(item))
 
     def _do_ocr(self, item: ClipboardItem):
@@ -724,9 +722,9 @@ class MainWindow(QMainWindow):
         if text:
             clipboard = QApplication.clipboard()
             clipboard.setText(text)
-            self.status_label.setText(f"OCR: {len(text)} ký tự được trích xuất")
+            self.status_label.setText(t("ocr_extracted", count=len(text)))
         else:
-            self.status_label.setText("OCR: Không tìm thấy văn bản")
+            self.status_label.setText(t("ocr_no_text"))
         QTimer.singleShot(3000, lambda: self.status_label.setText(t("ready")))
 
     @pyqtSlot(str)
@@ -1001,13 +999,11 @@ class MainWindow(QMainWindow):
             elif not self._all_collapsed and w._collapsed:
                 w._toggle_collapse()
         if self._all_collapsed:
-            # All expanded now — button says "collapse all"
             self.collapse_all_btn.setText(self.ICON_COLLAPSE_ALL)
-            self.collapse_all_btn.setToolTip("Thu gọn tất cả")
+            self.collapse_all_btn.setToolTip(t("collapse_all"))
         else:
-            # All collapsed now — button says "expand all"
             self.collapse_all_btn.setText(self.ICON_EXPAND_ALL)
-            self.collapse_all_btn.setToolTip("Mở rộng tất cả")
+            self.collapse_all_btn.setToolTip(t("expand_all"))
 
     # ═══════════════════════════════════════════════════
     #  SEARCH
@@ -1101,6 +1097,36 @@ class MainWindow(QMainWindow):
         rules = self.db.get_tab_rules()
         self.app_detector.set_rules(rules)
 
+        # Refresh all UI text for current language
+        self._refresh_ui_text()
+
+    def _refresh_ui_text(self):
+        """Update all UI labels/tooltips for the current language."""
+        self._settings_btn.setToolTip(t("settings"))
+        self.search_bar.setPlaceholderText(t("search_placeholder"))
+        self.mode_btn.setToolTip(t("picking_style"))
+        self.strip_btn.setToolTip(t("strip_formatting"))
+        self.enter_btn.setToolTip(t("auto_enter"))
+        self._reset_btn.setToolTip(t("reset_queue"))
+        self.pin_filter_btn.setToolTip(t("pin_filter"))
+        self.ghost_btn.setToolTip(t("ghost_mode"))
+        self._clear_btn.setToolTip(t("clear_tab"))
+        self._empty_text.setText(t("empty_title") + "\n" + t("empty_subtitle"))
+        self.status_label.setText(t("ready"))
+        self._update_count()
+        if self._all_collapsed:
+            self.collapse_all_btn.setToolTip(t("collapse_all"))
+        else:
+            self.collapse_all_btn.setToolTip(t("expand_all"))
+        # Tray menu
+        if hasattr(self, '_tray_show_action'):
+            self._tray_show_action.setText(t("tray_show"))
+            self._tray_ghost_action.setText(t("tray_ghost"))
+            self._tray_settings_action.setText(t("tray_settings"))
+            self._tray_quit_action.setText(t("tray_quit"))
+        # Reload item widgets so context menus use new language
+        self._load_items()
+
     # ═══════════════════════════════════════════════════
     #  SYSTEM TRAY
     # ═══════════════════════════════════════════════════
@@ -1124,9 +1150,9 @@ class MainWindow(QMainWindow):
 
         # Tray menu
         tray_menu = QMenu()
-        show_action = QAction(t("tray_show"), self)
-        show_action.triggered.connect(self._animate_show)
-        tray_menu.addAction(show_action)
+        self._tray_show_action = QAction(t("tray_show"), self)
+        self._tray_show_action.triggered.connect(self._animate_show)
+        tray_menu.addAction(self._tray_show_action)
 
         ghost_action = QAction(t("tray_ghost"), self)
         ghost_action.setCheckable(True)
@@ -1137,15 +1163,15 @@ class MainWindow(QMainWindow):
 
         tray_menu.addSeparator()
 
-        settings_action = QAction(t("tray_settings"), self)
-        settings_action.triggered.connect(self._open_settings)
-        tray_menu.addAction(settings_action)
+        self._tray_settings_action = QAction(t("tray_settings"), self)
+        self._tray_settings_action.triggered.connect(self._open_settings)
+        tray_menu.addAction(self._tray_settings_action)
 
         tray_menu.addSeparator()
 
-        quit_action = QAction(t("tray_quit"), self)
-        quit_action.triggered.connect(self._quit_app)
-        tray_menu.addAction(quit_action)
+        self._tray_quit_action = QAction(t("tray_quit"), self)
+        self._tray_quit_action.triggered.connect(self._quit_app)
+        tray_menu.addAction(self._tray_quit_action)
 
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.activated.connect(self._on_tray_activated)

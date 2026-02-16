@@ -8,6 +8,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence
 from cyberclip.storage.models import AppSettings
 from cyberclip.utils.constants import DEFAULT_HOTKEYS, FONT_FAMILY, FONT_FAMILY_FALLBACK, ACCENT
+from cyberclip.utils.i18n import t
 
 
 class HotkeyRecorderEdit(QLineEdit):
@@ -17,7 +18,7 @@ class HotkeyRecorderEdit(QLineEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setReadOnly(True)
-        self.setPlaceholderText("Nhấn để ghi phím tắt…")
+        self.setPlaceholderText(t("hotkey_record_placeholder"))
         self._apply_style(False)
         self._recording = False
 
@@ -34,13 +35,13 @@ class HotkeyRecorderEdit(QLineEdit):
         super().focusInEvent(event)
         self._recording = True
         self._apply_style(True)
-        self.setPlaceholderText("Nhấn tổ hợp phím…")
+        self.setPlaceholderText(t("hotkey_record_active"))
 
     def focusOutEvent(self, event):
         super().focusOutEvent(event)
         self._recording = False
         self._apply_style(False)
-        self.setPlaceholderText("Nhấn để ghi phím tắt…")
+        self.setPlaceholderText(t("hotkey_record_placeholder"))
 
     def keyPressEvent(self, event):
         if not self._recording:
@@ -76,7 +77,7 @@ class SettingsDialog(QDialog):
     def __init__(self, settings: AppSettings, parent=None):
         super().__init__(parent)
         self.settings = settings
-        self.setWindowTitle("⚙  Cài đặt CyberClip")
+        self.setWindowTitle(t("settings_title"))
         self.setMinimumSize(500, 500)
         self.setModal(True)
         self._hotkey_edits = {}
@@ -89,7 +90,7 @@ class SettingsDialog(QDialog):
         layout.setSpacing(12)
 
         # Title
-        title = QLabel("⚙  CÀI ĐẶT")
+        title = QLabel(t("settings_header"))
         title.setStyleSheet(
             f"font-family: '{FONT_FAMILY}', '{FONT_FAMILY_FALLBACK}'; "
             f"font-size: 16px; font-weight: bold; color: {ACCENT}; "
@@ -114,26 +115,26 @@ class SettingsDialog(QDialog):
         gen_layout.setContentsMargins(12, 12, 12, 12)
 
         self.picking_combo = QComboBox()
-        self.picking_combo.addItems(["FIFO (Vào trước, Ra trước)", "LIFO (Vào sau, Ra trước)"])
-        gen_layout.addRow("Kiểu chọn:", self.picking_combo)
+        self.picking_combo.addItems([t("fifo_label"), t("lifo_label")])
+        gen_layout.addRow(t("picking_style"), self.picking_combo)
 
         self.lang_combo = QComboBox()
         self.lang_combo.addItems(["Tiếng Việt", "English"])
-        gen_layout.addRow("Ngôn ngữ / Language:", self.lang_combo)
+        gen_layout.addRow(t("language"), self.lang_combo)
 
-        self.strip_check = QCheckBox("Xóa định dạng khi dán")
+        self.strip_check = QCheckBox(t("strip_formatting"))
         gen_layout.addRow(self.strip_check)
 
-        self.auto_enter_check = QCheckBox("Tự nhấn Enter sau dán")
+        self.auto_enter_check = QCheckBox(t("auto_enter"))
         gen_layout.addRow(self.auto_enter_check)
 
-        self.auto_tab_check = QCheckBox("Tự nhấn Tab sau dán")
+        self.auto_tab_check = QCheckBox(t("auto_tab"))
         gen_layout.addRow(self.auto_tab_check)
 
-        self.super_paste_check = QCheckBox("Thay thế Ctrl+V (Dán nâng cao)")
+        self.super_paste_check = QCheckBox(t("super_paste"))
         gen_layout.addRow(self.super_paste_check)
 
-        tabs.addTab(general_tab, "Chung")
+        tabs.addTab(general_tab, t("tab_general"))
 
         # ── Hotkeys tab ──
         hotkey_tab = QWidget()
@@ -141,17 +142,17 @@ class SettingsDialog(QDialog):
         hk_layout.setSpacing(10)
         hk_layout.setContentsMargins(12, 12, 12, 12)
 
-        hk_info = QLabel("Phím tắt toàn cục — nhấn vào ô rồi bấm tổ hợp phím mong muốn")
+        hk_info = QLabel(t("hotkey_info"))
         hk_info.setStyleSheet(f"color: {ACCENT}; font-size: 11px; font-weight: bold;")
         hk_info.setWordWrap(True)
         hk_layout.addWidget(hk_info)
 
         hotkey_actions = {
-            "sequential_paste": "Dán tuần tự (dán & chuyển tiếp)",
-            "paste_all": "Dán hàng loạt (dán tất cả)",
-            "toggle_window": "Hiện / Ẩn CyberClip",
-            "skip_item": "Bỏ qua mục tiếp theo",
-            "ghost_mode": "Bật/Tắt chế độ ẩn",
+            "sequential_paste": t("sequential_paste"),
+            "paste_all": t("paste_all"),
+            "toggle_window": t("toggle_window"),
+            "skip_item": t("skip_item"),
+            "ghost_mode": t("ghost_mode_hotkey"),
         }
 
         for action, label_text in hotkey_actions.items():
@@ -170,17 +171,17 @@ class SettingsDialog(QDialog):
 
         hk_layout.addSpacing(8)
 
-        ref_label = QLabel("Phím tắt trong ứng dụng (không thể thay đổi)")
+        ref_label = QLabel(t("in_app_shortcuts_label"))
         ref_label.setStyleSheet("color: #555566; font-size: 10px; margin-top: 8px;")
         hk_layout.addWidget(ref_label)
 
         in_app_shortcuts = [
-            ("Enter", "Sao chép mục đã chọn"),
-            ("↑ / ↓", "Di chuyển giữa các mục"),
-            ("Delete", "Xóa mục đã chọn"),
-            ("Ctrl+P", "Ghim / Bỏ ghim"),
-            ("Ctrl+F", "Tìm kiếm"),
-            ("Escape", "Ẩn / Dừng dán hàng loạt"),
+            ("Enter", t("shortcut_copy")),
+            ("↑ / ↓", t("shortcut_navigate")),
+            ("Delete", t("shortcut_delete")),
+            ("Ctrl+P", t("shortcut_pin")),
+            ("Ctrl+F", t("shortcut_search")),
+            ("Escape", t("shortcut_escape")),
         ]
         for key, desc in in_app_shortcuts:
             row = QHBoxLayout()
@@ -196,14 +197,14 @@ class SettingsDialog(QDialog):
             row.addWidget(desc_lbl, 1)
             hk_layout.addLayout(row)
 
-        reset_hk_btn = QPushButton("Đặt lại phím tắt mặc định")
+        reset_hk_btn = QPushButton(t("reset_hotkeys"))
         reset_hk_btn.clicked.connect(self._reset_hotkeys)
         hk_layout.addSpacing(6)
         hk_layout.addWidget(reset_hk_btn)
 
         hk_layout.addStretch()
 
-        tabs.addTab(hotkey_tab, "Phím tắt")
+        tabs.addTab(hotkey_tab, t("tab_hotkeys"))
 
         layout.addWidget(tabs)
 
@@ -211,11 +212,11 @@ class SettingsDialog(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        cancel_btn = QPushButton("Hủy")
+        cancel_btn = QPushButton(t("btn_cancel"))
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
 
-        save_btn = QPushButton("💾  Lưu")
+        save_btn = QPushButton(t("btn_save"))
         save_btn.clicked.connect(self._save)
         btn_layout.addWidget(save_btn)
 

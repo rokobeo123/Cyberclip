@@ -19,6 +19,7 @@ from cyberclip.utils.constants import (
     TYPE_TEXT, TYPE_IMAGE, TYPE_FILE, TYPE_URL, TYPE_COLOR,
     NEON_CYAN, NEON_PURPLE, NEON_PINK, TEXT_DIM,
 )
+from cyberclip.utils.i18n import t
 
 
 class ClipItemWidget(QWidget):
@@ -150,7 +151,7 @@ class ClipItemWidget(QWidget):
         self.pin_btn.setObjectName("PinButton")
         self.pin_btn.setProperty("pinned", str(self.item.pinned).lower())
         self.pin_btn.setFixedSize(28, 28)
-        self.pin_btn.setToolTip("Ghim" if not self.item.pinned else "Bỏ ghim")
+        self.pin_btn.setToolTip(t("unpin") if self.item.pinned else t("pin"))
         self.pin_btn.clicked.connect(lambda: self.pin_toggled.emit(self.item))
         actions_layout.addWidget(self.pin_btn)
 
@@ -158,7 +159,7 @@ class ClipItemWidget(QWidget):
         paste_btn = QPushButton(self.ICON_PASTE)
         paste_btn.setObjectName("ClipAction")
         paste_btn.setFixedSize(28, 28)
-        paste_btn.setToolTip("Dán")
+        paste_btn.setToolTip(t("paste"))
         paste_btn.clicked.connect(lambda: self.paste_requested.emit(self.item))
         actions_layout.addWidget(paste_btn)
 
@@ -168,14 +169,14 @@ class ClipItemWidget(QWidget):
             view_btn = QPushButton(self.ICON_VIEW)
             view_btn.setObjectName("ClipAction")
             view_btn.setFixedSize(28, 28)
-            view_btn.setToolTip("Xem ảnh")
+            view_btn.setToolTip(t("view_image"))
             view_btn.clicked.connect(lambda: self.view_image_requested.emit(self.item))
             actions_layout.addWidget(view_btn)
 
             ocr_btn = QPushButton(self.ICON_OCR)
             ocr_btn.setObjectName("ClipAction")
             ocr_btn.setFixedSize(28, 28)
-            ocr_btn.setToolTip("Quét văn bản (OCR)")
+            ocr_btn.setToolTip(t("ocr_scan"))
             ocr_btn.clicked.connect(lambda: self.ocr_requested.emit(self.item))
             actions_layout.addWidget(ocr_btn)
 
@@ -183,7 +184,7 @@ class ClipItemWidget(QWidget):
             open_btn = QPushButton(self.ICON_OPEN)
             open_btn.setObjectName("ClipAction")
             open_btn.setFixedSize(28, 28)
-            open_btn.setToolTip("Mở trong Explorer")
+            open_btn.setToolTip(t("open_explorer"))
             open_btn.clicked.connect(lambda: self.open_file_requested.emit(self.item.text_content))
             actions_layout.addWidget(open_btn)
 
@@ -192,7 +193,7 @@ class ClipItemWidget(QWidget):
             copy_btn = QPushButton(self.ICON_COPY)
             copy_btn.setObjectName("ClipAction")
             copy_btn.setFixedSize(28, 28)
-            copy_btn.setToolTip("Sao chép")
+            copy_btn.setToolTip(t("copy"))
             copy_btn.clicked.connect(lambda: self._copy_to_clipboard())
             actions_layout.addWidget(copy_btn)
 
@@ -433,27 +434,27 @@ class ClipItemWidget(QWidget):
             "QMenu::separator { height: 1px; background-color: rgba(255,255,255,0.08); "
             "margin: 4px 12px; }"
         )
-        menu.addAction("▶ Bắt đầu từ đây", lambda: self.start_from_here.emit(self.item))
+        menu.addAction(t("ctx_start_here"), lambda: self.start_from_here.emit(self.item))
         menu.addSeparator()
-        menu.addAction("📋 Dán", lambda: self.paste_requested.emit(self.item))
-        menu.addAction("📌 Ghim/Bỏ ghim", lambda: self.pin_toggled.emit(self.item))
+        menu.addAction(t("ctx_paste"), lambda: self.paste_requested.emit(self.item))
+        menu.addAction(t("ctx_pin"), lambda: self.pin_toggled.emit(self.item))
 
         if self.item.content_type in (TYPE_TEXT, TYPE_URL):
             menu.addSeparator()
-            menu.addAction("📑 Sao chép", lambda: self._copy_to_clipboard())
+            menu.addAction(t("ctx_copy"), lambda: self._copy_to_clipboard())
 
         if self.item.content_type == TYPE_IMAGE:
             menu.addSeparator()
-            menu.addAction("👁 Xem ảnh", lambda: self.view_image_requested.emit(self.item))
-            menu.addAction("🔍 Quét OCR", lambda: self.ocr_requested.emit(self.item))
+            menu.addAction(t("ctx_view_image"), lambda: self.view_image_requested.emit(self.item))
+            menu.addAction(t("ctx_ocr"), lambda: self.ocr_requested.emit(self.item))
 
         if self.item.content_type == TYPE_FILE:
             menu.addSeparator()
-            menu.addAction("📂 Mở trong Explorer",
+            menu.addAction(t("ctx_open_explorer"),
                           lambda: self.open_file_requested.emit(self.item.text_content))
 
         menu.addSeparator()
-        menu.addAction("🗑️ Xóa", lambda: self.delete_requested.emit(self.item))
+        menu.addAction(t("ctx_delete"), lambda: self.delete_requested.emit(self.item))
         menu.exec(pos)
 
     def _copy_to_clipboard(self):

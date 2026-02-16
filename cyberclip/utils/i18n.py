@@ -106,6 +106,11 @@ _STRINGS = {
         # Empty state
         "empty_title": "Chưa có gì",
         "empty_subtitle": "Copy nội dung để bắt đầu",
+
+        # OCR
+        "ocr_scanning": "Đang quét văn bản (OCR)…",
+        "ocr_extracted": "OCR: {count} ký tự được trích xuất",
+        "ocr_no_text": "OCR: Không tìm thấy văn bản",
     },
 
     "en": {
@@ -202,6 +207,11 @@ _STRINGS = {
 
         "empty_title": "Nothing here",
         "empty_subtitle": "Copy something to get started",
+
+        # OCR
+        "ocr_scanning": "Scanning text (OCR)…",
+        "ocr_extracted": "OCR: {count} characters extracted",
+        "ocr_no_text": "OCR: No text found",
     },
 }
 
