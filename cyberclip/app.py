@@ -5,11 +5,20 @@ import ctypes
 
 from PyQt6.QtWidgets import QApplication
 from PyQt6.QtCore import Qt, QCoreApplication
-from PyQt6.QtGui import QFont, QFontDatabase
+from PyQt6.QtGui import QFont, QFontDatabase, QIcon
 
 from cyberclip.gui.main_window import MainWindow
 from cyberclip.gui.styles import CYBERPUNK_QSS
 from cyberclip.utils.constants import APP_NAME, FONT_FAMILY, FONT_FAMILY_FALLBACK
+
+
+def _get_icon_path() -> str:
+    """Resolve icon path for both dev and PyInstaller builds."""
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.dirname(__file__))
+    return os.path.join(base, "assets", "icon.ico")
 
 
 def setup_high_dpi():
@@ -64,6 +73,11 @@ def create_app() -> tuple:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setQuitOnLastWindowClosed(False)
+
+    # Set app icon
+    icon_path = _get_icon_path()
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
 
     # Load fonts
     load_fonts(app)

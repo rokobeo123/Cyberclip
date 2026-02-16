@@ -1134,20 +1134,23 @@ class MainWindow(QMainWindow):
     # ═══════════════════════════════════════════════════
     def _setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
-        # Generate a simple icon
-        pix = QPixmap(32, 32)
-        pix.fill(QColor(0, 0, 0, 0))
-        painter = QPainter(pix)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setBrush(QColor(79, 124, 255))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(2, 2, 28, 28, 8, 8)
-        painter.setPen(QColor(255, 255, 255))
-        font = QFont(FONT_FAMILY, 14, QFont.Weight.Bold)
-        painter.setFont(font)
-        painter.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, "C")
-        painter.end()
-        self.tray_icon.setIcon(QIcon(pix))
+        # Use app icon from assets, fallback to generated icon
+        app_icon = QApplication.instance().windowIcon()
+        if app_icon.isNull():
+            pix = QPixmap(32, 32)
+            pix.fill(QColor(0, 0, 0, 0))
+            painter = QPainter(pix)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setBrush(QColor(79, 124, 255))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(2, 2, 28, 28, 8, 8)
+            painter.setPen(QColor(255, 255, 255))
+            font = QFont(FONT_FAMILY, 14, QFont.Weight.Bold)
+            painter.setFont(font)
+            painter.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, "C")
+            painter.end()
+            app_icon = QIcon(pix)
+        self.tray_icon.setIcon(app_icon)
         self.tray_icon.setToolTip(APP_NAME)
 
         # Tray menu
