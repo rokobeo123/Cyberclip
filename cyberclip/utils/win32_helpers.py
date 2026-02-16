@@ -109,6 +109,21 @@ def send_ctrl_v():
     user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
 
 
+def send_ctrl_v_fast():
+    """Fast Ctrl+V injection: force-release modifiers then send Ctrl+V immediately.
+    Used for sequential paste where the paste lock prevents race conditions."""
+    import time
+    release_all_modifiers()
+    time.sleep(0.01)
+    user32.keybd_event(VK_CONTROL, 0, 0, 0)
+    time.sleep(0.01)
+    user32.keybd_event(0x56, 0, 0, 0)  # V down
+    time.sleep(0.01)
+    user32.keybd_event(0x56, 0, KEYEVENTF_KEYUP, 0)  # V up
+    time.sleep(0.01)
+    user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+
+
 def get_foreground_hwnd():
     """Return the current foreground window handle."""
     return user32.GetForegroundWindow()

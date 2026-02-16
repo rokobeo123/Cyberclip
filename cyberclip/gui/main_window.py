@@ -87,6 +87,8 @@ class MainWindow(QMainWindow):
         self._search_query = ""
         self._pin_filter = False
         self._target_hwnd = None  # foreground window to paste into
+        self._paste_busy = False  # lock to prevent rapid paste skipping
+        self._paste_all_active = False  # paste-all queue mode
 
         # Clipboard monitor (create before UI setup so _apply_settings works)
         self.monitor = ClipboardMonitor(self.image_store)
@@ -575,14 +577,16 @@ class MainWindow(QMainWindow):
         """The CORE feature: paste current magazine item into the target app,
         then auto-advance to the next item.  Triggered by global hotkey.
         
-        Key: do NOT touch window visibility. The user's foreground app
-        is already correct when the hotkey fires. Just set clipboard
-        and inject Ctrl+V via keybd_event.
+        Uses a lock to prevent rapid presses from skipping clips.
         """
+        if self._paste_busy:
+            return  # previous paste still in progress
+
         item = self.magazine.fire()
         if not item:
             return
 
+        self._paste_busy = True
         self.monitor.pause()
 
         clipboard = QApplication.clipboard()
@@ -602,7 +606,7 @@ class MainWindow(QMainWindow):
         self._highlight_magazine_item()
 
         # Inject Ctrl+V after a short delay for clipboard sync
-        QTimer.singleShot(50, self._do_inject_paste)
+        QTimer.singleShot(30, self._do_inject_paste)
 
     @pyqtSlot(ClipboardItem)
     def _paste_and_inject(self, item: ClipboardItem):
@@ -631,30 +635,30 @@ class MainWindow(QMainWindow):
     def _do_inject_paste(self):
         """Inject Ctrl+V into whatever window is currently focused."""
         from cyberclip.utils.win32_helpers import (
-            send_ctrl_v, send_key, VK_RETURN, VK_TAB, KEYEVENTF_KEYUP,
+            send_ctrl_v_fast, send_key, VK_RETURN, VK_TAB, KEYEVENTF_KEYUP,
         )
         import time
 
-        # send_ctrl_v() releases ALL stuck modifiers then sends clean Ctrl+V
-        send_ctrl_v()
-        time.sleep(0.05)
+        send_ctrl_v_fast()
+        time.sleep(0.03)
 
         # Auto-movement after paste
         if self.settings.auto_enter:
-            time.sleep(0.03)
+            time.sleep(0.02)
             send_key(vk=VK_RETURN)
             time.sleep(0.02)
             send_key(vk=VK_RETURN, flags=KEYEVENTF_KEYUP)
         elif self.settings.auto_tab:
-            time.sleep(0.03)
+            time.sleep(0.02)
             send_key(vk=VK_TAB)
             time.sleep(0.02)
             send_key(vk=VK_TAB, flags=KEYEVENTF_KEYUP)
 
-        QTimer.singleShot(150, self._after_paste)
+        QTimer.singleShot(80, self._after_paste)
 
     def _after_paste(self):
         self.monitor.resume()
+        self._paste_busy = False  # release lock
         peek = self.magazine.peek()
         if peek:
             msg = f"✓ Đã dán — tiếp: {peek.preview[:30]}"
@@ -663,6 +667,12 @@ class MainWindow(QMainWindow):
         self.hud.notify(msg, 2000)
         self.status_label.setText(msg)
         QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+
+        # If paste-all is active, continue with next item
+        if self._paste_all_active and peek:
+            QTimer.singleShot(100, self._sequential_paste)
+        elif self._paste_all_active and not peek:
+            self._paste_all_active = False
 
     def _highlight_magazine_item(self):
         """Highlight the current magazine item in the item list."""
@@ -824,6 +834,23 @@ class MainWindow(QMainWindow):
         """Fire magazine — paste current item and auto-advance."""
         self._sequential_paste()
 
+    def _paste_all(self):
+        """Paste ALL remaining items in the queue sequentially."""
+        if self._paste_busy or self._paste_all_active:
+            # Stop if already running
+            self._paste_all_active = False
+            self.status_label.setText("⏹ Dừng dán hàng loạt")
+            QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+            return
+        if not self.magazine.peek():
+            self.status_label.setText("⚠ Hàng đợi trống")
+            QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+            return
+        self._paste_all_active = True
+        remaining = self.magazine.remaining
+        self.hud.notify(f"▶ Dán hàng loạt: {remaining} mục", 3000)
+        self._sequential_paste()
+
     def _skip_magazine(self):
         """Skip current magazine item without pasting."""
         item = self.magazine.fire()
@@ -875,6 +902,8 @@ class MainWindow(QMainWindow):
     def _on_global_hotkey(self, action: str):
         if action == "sequential_paste":
             self._sequential_paste()
+        elif action == "paste_all":
+            self._paste_all()
         elif action == "toggle_window":
             if self.isVisible():
                 self._animate_hide()
@@ -908,6 +937,7 @@ class MainWindow(QMainWindow):
             self.settings.picking_style = "FIFO"
             self.mode_btn.setText(self.ICON_FIFO + "  FIFO")
         self.magazine.set_mode(self.settings.picking_style)
+        self._highlight_magazine_item()
         self.db.save_all_settings(self.settings)
 
     def _toggle_strip(self):
@@ -939,10 +969,11 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
 
     def _reset_magazine(self):
-        """Reset magazine pointer back to the beginning."""
+        """Reset magazine: re-sort according to current FIFO/LIFO mode and start from beginning."""
         self.magazine.reset()
         self._highlight_magazine_item()
-        self.status_label.setText("▶ Hàng đợi đã đặt lại")
+        mode_name = "FIFO" if self.settings.picking_style == "FIFO" else "LIFO"
+        self.status_label.setText(f"▶ Đặt lại hàng đợi ({mode_name})")
         QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
 
     def _toggle_pin_filter(self):
@@ -1158,9 +1189,15 @@ class MainWindow(QMainWindow):
         key = event.key()
         mods = event.modifiers()
 
-        # Escape — hide window
+        # Escape — stop paste-all if active, otherwise hide window
         if key == Qt.Key.Key_Escape:
-            self._animate_hide()
+            if self._paste_all_active:
+                self._paste_all_active = False
+                self.status_label.setText("⏹ Đã dừng dán hàng loạt")
+                self.hud.notify("⏹ Đã dừng dán hàng loạt", 2000)
+                QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+            else:
+                self._animate_hide()
             return
 
         # Enter — paste selected item (copy to clipboard)

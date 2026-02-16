@@ -26,6 +26,7 @@ TYPE_COLOR = "color"
 # Default hotkeys (global — work even when window is hidden)
 DEFAULT_HOTKEYS = {
     "sequential_paste": "Ctrl+Shift+V",
+    "paste_all": "Ctrl+Shift+A",
     "toggle_window": "Ctrl+Shift+C",
     "skip_item": "Ctrl+Shift+S",
     "ghost_mode": "Ctrl+Shift+G",

@@ -144,6 +144,7 @@ class SettingsDialog(QDialog):
 
         hotkey_actions = {
             "sequential_paste": "Dán tuần tự (dán & chuyển tiếp)",
+            "paste_all": "Dán hàng loạt (dán tất cả)",
             "toggle_window": "Hiện / Ẩn CyberClip",
             "skip_item": "Bỏ qua mục tiếp theo",
             "ghost_mode": "Bật/Tắt chế độ ẩn",
@@ -175,7 +176,7 @@ class SettingsDialog(QDialog):
             ("Delete", "Xóa mục đã chọn"),
             ("Ctrl+P", "Ghim / Bỏ ghim"),
             ("Ctrl+F", "Tìm kiếm"),
-            ("Escape", "Ẩn / Dừng gõ ảo"),
+            ("Escape", "Ẩn / Dừng dán hàng loạt"),
         ]
         for key, desc in in_app_shortcuts:
             row = QHBoxLayout()

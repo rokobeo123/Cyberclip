@@ -11,25 +11,36 @@ class Magazine(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._queue: List[ClipboardItem] = []
+        self._raw_items: List[ClipboardItem] = []  # original FIFO-ordered items
         self._index = 0
         self._mode = "FIFO"  # FIFO or LIFO
 
     def set_mode(self, mode: str):
-        self._mode = mode
+        if mode != self._mode:
+            self._mode = mode
+            self._apply_order()
 
-    def load(self, items: List[ClipboardItem]):
+    def _apply_order(self):
+        """Re-sort the queue based on current mode, reset pointer."""
         if self._mode == "FIFO":
-            self._queue = list(items)
+            self._queue = list(self._raw_items)
         else:
-            self._queue = list(reversed(items))
+            self._queue = list(reversed(self._raw_items))
         self._index = 0
         self._emit_status()
 
+    def load(self, items: List[ClipboardItem]):
+        self._raw_items = list(items)  # always store FIFO order
+        self._apply_order()
+
     def add(self, item: ClipboardItem):
+        self._raw_items.append(item)  # always append in FIFO order
         if self._mode == "FIFO":
             self._queue.append(item)
         else:
-            self._queue.insert(0, item)
+            # Insert before the current pointer so new items don't skip
+            self._queue.insert(self._index, item)
+            self._index += 1  # shift pointer to keep current item
         self._emit_status()
 
     def peek(self) -> Optional[ClipboardItem]:
@@ -50,11 +61,12 @@ class Magazine(QObject):
         return None
 
     def reset(self):
-        self._index = 0
-        self._emit_status()
+        """Reset: re-sort according to current mode and start from beginning."""
+        self._apply_order()
 
     def clear(self):
         self._queue.clear()
+        self._raw_items.clear()
         self._index = 0
         self._emit_status()
 
@@ -77,12 +89,12 @@ class Magazine(QObject):
         for iid in item_ids:
             if iid in id_to_item:
                 new_queue.append(id_to_item.pop(iid))
-        # Append any remaining items not in the new order
         for it in self._queue:
             if it.id in id_to_item:
                 new_queue.append(it)
                 del id_to_item[it.id]
         self._queue = new_queue
+        self._raw_items = list(new_queue)  # keep raw in sync
         # Restore pointer to the same item if possible
         if current_item:
             for i, it in enumerate(self._queue):
