@@ -238,33 +238,26 @@ class ClipItemWidget(QWidget):
         self._content_widgets.append(self.full_content_label)
 
     def _setup_image_content(self, layout):
-        # Thumbnail preview — scale to fill width, no black padding
         self.thumb_label = QLabel()
-        self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self.thumb_label.setStyleSheet(
             "border-radius: 6px; border: 1px solid rgba(255,255,255,0.08); padding: 0px;"
         )
-        self.thumb_label.setScaledContents(False)
 
         pix = None
         if os.path.exists(self.item.image_path):
             pix = QPixmap(self.item.image_path)
             if not pix.isNull():
-                # Scale to fill available width, keep aspect ratio
-                scaled = pix.scaledToWidth(
-                    320,
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                # Cap height at 80px for compact view
-                if scaled.height() > 80:
-                    scaled = pix.scaled(
-                        320, 80,
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation
+                # Cap height at 80px, scale to fit
+                if pix.height() > 80:
+                    scaled = pix.scaledToHeight(
+                        80, Qt.TransformationMode.SmoothTransformation
                     )
+                else:
+                    scaled = pix
                 self.thumb_label.setPixmap(scaled)
-                self.thumb_label.setFixedHeight(scaled.height())
-        layout.addWidget(self.thumb_label)
+                self.thumb_label.setFixedSize(scaled.width(), scaled.height())
+        layout.addWidget(self.thumb_label, 0, Qt.AlignmentFlag.AlignLeft)
         self._content_widgets.append(self.thumb_label)
 
         # Image info line
