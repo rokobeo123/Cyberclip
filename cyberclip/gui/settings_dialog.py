@@ -117,6 +117,10 @@ class SettingsDialog(QDialog):
         self.picking_combo.addItems(["FIFO (Vào trước, Ra trước)", "LIFO (Vào sau, Ra trước)"])
         gen_layout.addRow("Kiểu chọn:", self.picking_combo)
 
+        self.lang_combo = QComboBox()
+        self.lang_combo.addItems(["Tiếng Việt", "English"])
+        gen_layout.addRow("Ngôn ngữ / Language:", self.lang_combo)
+
         self.strip_check = QCheckBox("Xóa định dạng khi dán")
         gen_layout.addRow(self.strip_check)
 
@@ -220,6 +224,7 @@ class SettingsDialog(QDialog):
     def _load_values(self):
         s = self.settings
         self.picking_combo.setCurrentIndex(0 if s.picking_style == "FIFO" else 1)
+        self.lang_combo.setCurrentIndex(0 if getattr(s, 'language', 'vi') == "vi" else 1)
         self.strip_check.setChecked(s.strip_formatting)
         self.auto_enter_check.setChecked(s.auto_enter)
         self.auto_tab_check.setChecked(s.auto_tab)
@@ -236,6 +241,7 @@ class SettingsDialog(QDialog):
     def _save(self):
         s = self.settings
         s.picking_style = "FIFO" if self.picking_combo.currentIndex() == 0 else "LIFO"
+        s.language = "vi" if self.lang_combo.currentIndex() == 0 else "en"
         s.strip_formatting = self.strip_check.isChecked()
         s.auto_enter = self.auto_enter_check.isChecked()
         s.auto_tab = self.auto_tab_check.isChecked()

@@ -183,6 +183,7 @@ class Database:
             "super_paste_enabled": settings.super_paste_enabled,
             "ghost_type_speed": settings.ghost_type_speed,
             "theme": settings.theme,
+            "language": settings.language,
             "blacklist": settings.blacklist,
             "hotkeys": settings.hotkeys,
             "window_x": settings.window_x,
@@ -203,6 +204,7 @@ class Database:
         s.super_paste_enabled = self.get_setting("super_paste_enabled", False)
         s.ghost_type_speed = self.get_setting("ghost_type_speed", 15)
         s.theme = self.get_setting("theme", "cyberpunk")
+        s.language = self.get_setting("language", "vi")
         s.blacklist = self.get_setting("blacklist", [])
         s.hotkeys = self.get_setting("hotkeys", {})
         s.window_x = self.get_setting("window_x", -1)

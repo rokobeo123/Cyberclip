@@ -34,6 +34,8 @@ class ClipboardMonitor(QObject):
         self._blacklist = []
         self._paused = False
         self._skip_count = 0
+        self._last_image_hash = None  # deduplicate rapid screenshot captures
+        self._last_text_hash = None   # deduplicate rapid text copies
 
         # Use Win32 clipboard sequence number — changes every time ANY app modifies clipboard
         try:
@@ -104,6 +106,17 @@ class ClipboardMonitor(QObject):
         if mime.hasImage():
             img = clipboard.image()
             if not img.isNull() and img.width() > 0 and img.height() > 0:
+                # Deduplicate: hash image bytes to skip duplicates from rapid clipboard changes
+                ptr = img.bits()
+                if ptr is not None:
+                    try:
+                        ptr.setsize(img.sizeInBytes())
+                        img_hash = hashlib.md5(bytes(ptr)).hexdigest()
+                        if img_hash == self._last_image_hash:
+                            return  # same image, skip
+                        self._last_image_hash = img_hash
+                    except Exception:
+                        pass
                 path = self.image_store.save_qimage(img)
                 item = ClipboardItem(
                     content_type=TYPE_IMAGE,

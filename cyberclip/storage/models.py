@@ -50,6 +50,7 @@ class AppSettings:
     super_paste_enabled: bool = False
     ghost_type_speed: int = 15
     theme: str = "cyberpunk"
+    language: str = "vi"  # "vi" or "en"
     blacklist: list = field(default_factory=list)
     hotkeys: dict = field(default_factory=dict)
     tab_rules: list = field(default_factory=list)

@@ -42,6 +42,7 @@ from cyberclip.utils.constants import (
     TEXT_SECONDARY, ACCENT, ANIM_FAST, ANIM_NORMAL,
 )
 from cyberclip.core.global_hotkeys import GlobalHotkeyManager
+from cyberclip.utils.i18n import set_language, t
 
 
 class MainWindow(QMainWindow):
@@ -248,7 +249,7 @@ class MainWindow(QMainWindow):
         # Reset queue button
         reset_btn = QPushButton("\uf0e2")  # rotate-left icon
         reset_btn.setObjectName("ToolButton")
-        reset_btn.setToolTip("Đặt lại hàng đợi")
+        reset_btn.setToolTip(t("reset_queue"))
         reset_btn.clicked.connect(self._reset_magazine)
         tb2_layout.addWidget(reset_btn)
 
@@ -256,7 +257,7 @@ class MainWindow(QMainWindow):
         self.pin_filter_btn = QPushButton(self.ICON_PIN_MENU)
         self.pin_filter_btn.setObjectName("ToolButton")
         self.pin_filter_btn.setCheckable(True)
-        self.pin_filter_btn.setToolTip("Chỉ hiện đã ghim")
+        self.pin_filter_btn.setToolTip(t("pin_filter"))
         self.pin_filter_btn.clicked.connect(self._toggle_pin_filter)
         tb2_layout.addWidget(self.pin_filter_btn)
 
@@ -273,7 +274,7 @@ class MainWindow(QMainWindow):
         self.ghost_btn.setObjectName("ToolButton")
         self.ghost_btn.setCheckable(True)
         self.ghost_btn.setChecked(self._ghost_mode)
-        self.ghost_btn.setToolTip("Chế độ ẩn - tạm dừng ghi")
+        self.ghost_btn.setToolTip(t("ghost_mode"))
         self.ghost_btn.clicked.connect(self._toggle_ghost_mode)
         tb2_layout.addWidget(self.ghost_btn)
 
@@ -327,7 +328,7 @@ class MainWindow(QMainWindow):
         sb_layout = QHBoxLayout(status_bar)
         sb_layout.setContentsMargins(12, 0, 12, 0)
 
-        self.status_label = QLabel("Sẵn sàng")
+        self.status_label = QLabel(t("ready"))
         self.status_label.setObjectName("StatusLabel")
         sb_layout.addWidget(self.status_label)
 
@@ -485,10 +486,10 @@ class MainWindow(QMainWindow):
         self.tab_bar.set_tabs(tabs)
 
         # Toast notification
-        self.hud.notify(f"Đã sao chép: {item.preview[:30]}", 2000)
+        self.hud.notify(f"📋 {item.preview[:30]}", 2000)
 
-        self.status_label.setText(f"Đã sao chép: {item.content_type}")
-        QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+        self.status_label.setText(t("copied_ctrlv"))
+        QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
     def _load_items(self):
         # Clear existing
@@ -543,7 +544,7 @@ class MainWindow(QMainWindow):
 
     def _update_count(self):
         count = len(self._item_widgets)
-        self.count_label.setText(f"{count} mục")
+        self.count_label.setText(t("items_count", count=count))
 
     # ═══════════════════════════════════════════════════
     #  ITEM ACTIONS
@@ -571,8 +572,8 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(500, self.monitor.resume)
 
         # Status feedback
-        self.status_label.setText("✓ Đã sao chép — Ctrl+V để dán")
-        QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+        self.status_label.setText(t("copied_ctrlv"))
+        QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
     def _sequential_paste(self):
         """The CORE feature: paste current magazine item into the target app,
@@ -664,12 +665,12 @@ class MainWindow(QMainWindow):
         self._paste_busy = False  # release lock
         peek = self.magazine.peek()
         if peek:
-            msg = f"✓ Đã dán — tiếp: {peek.preview[:30]}"
+            msg = t("pasted_next", preview=peek.preview[:30])
         else:
-            msg = "✓ Đã dán — hết hàng đợi"
+            msg = t("pasted_done")
         self.hud.notify(msg, 2000)
         self.status_label.setText(msg)
-        QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+        QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
         # Drain queued paste requests (from rapid Ctrl+Shift+V spam)
         if self._paste_queued > 0:
@@ -726,7 +727,7 @@ class MainWindow(QMainWindow):
             self.status_label.setText(f"OCR: {len(text)} ký tự được trích xuất")
         else:
             self.status_label.setText("OCR: Không tìm thấy văn bản")
-        QTimer.singleShot(3000, lambda: self.status_label.setText("Sẵn sàng"))
+        QTimer.singleShot(3000, lambda: self.status_label.setText(t("ready")))
 
     @pyqtSlot(str)
     def _open_file(self, path: str):
@@ -754,8 +755,8 @@ class MainWindow(QMainWindow):
             self._highlight_magazine_item()
             peek = self.magazine.peek()
             if peek:
-                self.status_label.setText(f"▶ Bắt đầu từ: {peek.preview[:40]}")
-                QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+                self.status_label.setText(f"▶ {t('start_from_here')}: {peek.preview[:40]}")
+                QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
     @pyqtSlot(ClipboardItem)
     def _start_from_here(self, item: ClipboardItem):
@@ -843,18 +844,17 @@ class MainWindow(QMainWindow):
     def _paste_all(self):
         """Paste ALL remaining items in the queue sequentially."""
         if self._paste_busy or self._paste_all_active:
-            # Stop if already running
             self._paste_all_active = False
-            self.status_label.setText("⏹ Dừng dán hàng loạt")
-            QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+            self.status_label.setText(t("paste_all_stop"))
+            QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
             return
         if not self.magazine.peek():
-            self.status_label.setText("⚠ Hàng đợi trống")
-            QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+            self.status_label.setText(t("queue_empty"))
+            QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
             return
         self._paste_all_active = True
         remaining = self.magazine.remaining
-        self.hud.notify(f"▶ Dán hàng loạt: {remaining} mục", 3000)
+        self.hud.notify(t("paste_all_start", count=remaining), 3000)
         self._sequential_paste()
 
     def _skip_magazine(self):
@@ -864,13 +864,13 @@ class MainWindow(QMainWindow):
             self._highlight_magazine_item()
             peek = self.magazine.peek()
             if peek:
-                self.status_label.setText(f"⏭ Bỏ qua — tiếp: {peek.preview[:40]}")
+                self.status_label.setText(t("skip_next", preview=peek.preview[:40]))
             else:
-                self.status_label.setText("⏭ Bỏ qua — hết hàng đợi")
-            QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+                self.status_label.setText(t("skip_done"))
+            QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
         else:
-            self.status_label.setText("⚠ Hàng đợi trống")
-            QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+            self.status_label.setText(t("queue_empty"))
+            QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
     @pyqtSlot(int, int)
     def _on_queue_changed(self, index, total):
@@ -965,32 +965,32 @@ class MainWindow(QMainWindow):
         self.hud.set_ghost_mode(self._ghost_mode)
         self.db.save_all_settings(self.settings)
 
-        self.status_label.setText("Chế độ ẩn: BẬT" if self._ghost_mode else "Chế độ ẩn: TẮT")
-        QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+        self.status_label.setText(t("ghost_on") if self._ghost_mode else t("ghost_off"))
+        QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
     def _clear_tab(self):
         self.db.clear_tab(self._current_tab)
         self._load_items()
-        self.status_label.setText(f"Đã xóa: {self._current_tab}")
-        QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+        self.status_label.setText(t("cleared_tab", tab=self._current_tab))
+        QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
     def _reset_magazine(self):
         """Reset magazine: re-sort according to current FIFO/LIFO mode and start from beginning."""
         self.magazine.reset()
         self._highlight_magazine_item()
         mode_name = "FIFO" if self.settings.picking_style == "FIFO" else "LIFO"
-        self.status_label.setText(f"▶ Đặt lại hàng đợi ({mode_name})")
-        QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+        self.status_label.setText(t("queue_reset", mode=mode_name))
+        QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
     def _toggle_pin_filter(self):
         """Toggle showing only pinned items."""
         self._pin_filter = self.pin_filter_btn.isChecked()
         self._load_items()
         if self._pin_filter:
-            self.status_label.setText("Chỉ hiện mục đã ghim")
+            self.status_label.setText(t("pin_only"))
         else:
-            self.status_label.setText("Hiện tất cả")
-        QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+            self.status_label.setText(t("show_all"))
+        QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
     def _toggle_collapse_all(self):
         """Toggle expand/collapse all clip items."""
@@ -1077,6 +1077,10 @@ class MainWindow(QMainWindow):
         self._reload_hotkeys()
 
     def _apply_settings(self):
+        # Set language
+        lang = getattr(self.settings, 'language', 'vi')
+        set_language(lang)
+
         self.magazine.set_mode(self.settings.picking_style)
         self.monitor.set_blacklist(self.settings.blacklist or DEFAULT_BLACKLIST)
         self.monitor.set_ghost_mode(self.settings.ghost_mode)
@@ -1120,11 +1124,11 @@ class MainWindow(QMainWindow):
 
         # Tray menu
         tray_menu = QMenu()
-        show_action = QAction("Hiện CyberClip", self)
+        show_action = QAction(t("tray_show"), self)
         show_action.triggered.connect(self._animate_show)
         tray_menu.addAction(show_action)
 
-        ghost_action = QAction("Chế độ ẩn", self)
+        ghost_action = QAction(t("tray_ghost"), self)
         ghost_action.setCheckable(True)
         ghost_action.setChecked(self._ghost_mode)
         ghost_action.triggered.connect(self._toggle_ghost_mode)
@@ -1133,13 +1137,13 @@ class MainWindow(QMainWindow):
 
         tray_menu.addSeparator()
 
-        settings_action = QAction("Cài đặt", self)
+        settings_action = QAction(t("tray_settings"), self)
         settings_action.triggered.connect(self._open_settings)
         tray_menu.addAction(settings_action)
 
         tray_menu.addSeparator()
 
-        quit_action = QAction("Thoát", self)
+        quit_action = QAction(t("tray_quit"), self)
         quit_action.triggered.connect(self._quit_app)
         tray_menu.addAction(quit_action)
 
@@ -1199,9 +1203,9 @@ class MainWindow(QMainWindow):
         if key == Qt.Key.Key_Escape:
             if self._paste_all_active:
                 self._paste_all_active = False
-                self.status_label.setText("⏹ Đã dừng dán hàng loạt")
-                self.hud.notify("⏹ Đã dừng dán hàng loạt", 2000)
-                QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
+                self.status_label.setText(t("paste_all_stopped"))
+                self.hud.notify(t("paste_all_stopped"), 2000)
+                QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
             else:
                 self._animate_hide()
             return

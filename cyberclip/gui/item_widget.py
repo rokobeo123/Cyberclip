@@ -210,15 +210,19 @@ class ClipItemWidget(QWidget):
         text = self.item.text_content or self.item.preview
         lines = text.split('\n')
         # Collapsed preview (compact — always visible)
-        display = lines[0][:80]
+        first_line = lines[0][:80]
         if len(lines[0]) > 80:
-            display += "…"
+            first_line += "…"
+        extra = ""
         if len(lines) > 1:
-            display += f"  (+{len(lines)-1} dòng)"
+            extra = f"  (+{len(lines)-1} dòng)"
+        display = first_line + extra
         self.content_label = QLabel(display)
         self.content_label.setObjectName("ClipContent")
-        self.content_label.setWordWrap(True)
-        self.content_label.setMaximumHeight(40)
+        self.content_label.setWordWrap(False)
+        self.content_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.content_label.setMaximumHeight(20)
+        self.content_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.content_label)
 
         # Expanded full content (hidden by default)
@@ -419,6 +423,16 @@ class ClipItemWidget(QWidget):
 
     def _show_context_menu(self, pos):
         menu = QMenu(self)
+        # Force opaque dark background (QSS alone may not override popup transparency)
+        menu.setStyleSheet(
+            "QMenu { background-color: #1C1C1E; border: 1px solid rgba(255,255,255,0.12); "
+            "border-radius: 8px; padding: 4px 0px; }"
+            "QMenu::item { background-color: transparent; padding: 8px 32px 8px 14px; "
+            "border-radius: 4px; margin: 2px 6px; color: #F5F5F7; font-size: 12px; }"
+            "QMenu::item:selected { background-color: rgba(255,255,255,0.10); }"
+            "QMenu::separator { height: 1px; background-color: rgba(255,255,255,0.08); "
+            "margin: 4px 12px; }"
+        )
         menu.addAction("▶ Bắt đầu từ đây", lambda: self.start_from_here.emit(self.item))
         menu.addSeparator()
         menu.addAction("📋 Dán", lambda: self.paste_requested.emit(self.item))
