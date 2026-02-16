@@ -194,7 +194,7 @@ class ClipboardMonitor(QObject):
             pass
 
     def pause(self):
-        """Pause monitoring and skip the next 2 sequence changes (from our paste)."""
+        """Pause monitoring — we're about to modify the clipboard ourselves."""
         self._paused = True
 
     def resume(self):
@@ -203,7 +203,7 @@ class ClipboardMonitor(QObject):
             self._seq_number = ctypes.windll.user32.GetClipboardSequenceNumber()
         except Exception:
             pass
-        self._skip_count = 1
+        self._skip_count = 2  # skip at least 2 seq changes from our set+paste
         self._paused = False
 
     def stop(self):

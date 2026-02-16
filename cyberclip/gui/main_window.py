@@ -88,6 +88,7 @@ class MainWindow(QMainWindow):
         self._pin_filter = False
         self._target_hwnd = None  # foreground window to paste into
         self._paste_busy = False  # lock to prevent rapid paste skipping
+        self._paste_queued = 0   # queued paste count from rapid key spam
         self._paste_all_active = False  # paste-all queue mode
 
         # Clipboard monitor (create before UI setup so _apply_settings works)
@@ -566,8 +567,8 @@ class MainWindow(QMainWindow):
                 text = to_plain_text(text)
             clipboard.setText(text)
 
-        # Brief delay then resume monitoring
-        QTimer.singleShot(300, self.monitor.resume)
+        # Delay resume to avoid re-capturing our own clipboard change
+        QTimer.singleShot(500, self.monitor.resume)
 
         # Status feedback
         self.status_label.setText("✓ Đã sao chép — Ctrl+V để dán")
@@ -577,13 +578,15 @@ class MainWindow(QMainWindow):
         """The CORE feature: paste current magazine item into the target app,
         then auto-advance to the next item.  Triggered by global hotkey.
         
-        Uses a lock to prevent rapid presses from skipping clips.
+        If already pasting, queues the request so rapid Ctrl+Shift+V spam works.
         """
         if self._paste_busy:
-            return  # previous paste still in progress
+            self._paste_queued += 1
+            return
 
         item = self.magazine.fire()
         if not item:
+            self._paste_queued = 0
             return
 
         self._paste_busy = True
@@ -640,24 +643,24 @@ class MainWindow(QMainWindow):
         import time
 
         send_ctrl_v_fast()
-        time.sleep(0.03)
 
         # Auto-movement after paste
         if self.settings.auto_enter:
             time.sleep(0.02)
             send_key(vk=VK_RETURN)
-            time.sleep(0.02)
+            time.sleep(0.01)
             send_key(vk=VK_RETURN, flags=KEYEVENTF_KEYUP)
         elif self.settings.auto_tab:
             time.sleep(0.02)
             send_key(vk=VK_TAB)
-            time.sleep(0.02)
+            time.sleep(0.01)
             send_key(vk=VK_TAB, flags=KEYEVENTF_KEYUP)
 
-        QTimer.singleShot(80, self._after_paste)
+        QTimer.singleShot(60, self._after_paste)
 
     def _after_paste(self):
-        self.monitor.resume()
+        # Don't resume monitoring immediately — give clipboard time to settle
+        QTimer.singleShot(200, self.monitor.resume)
         self._paste_busy = False  # release lock
         peek = self.magazine.peek()
         if peek:
@@ -668,8 +671,11 @@ class MainWindow(QMainWindow):
         self.status_label.setText(msg)
         QTimer.singleShot(2000, lambda: self.status_label.setText("Sẵn sàng"))
 
-        # If paste-all is active, continue with next item
-        if self._paste_all_active and peek:
+        # Drain queued paste requests (from rapid Ctrl+Shift+V spam)
+        if self._paste_queued > 0:
+            self._paste_queued -= 1
+            QTimer.singleShot(20, self._sequential_paste)
+        elif self._paste_all_active and peek:
             QTimer.singleShot(100, self._sequential_paste)
         elif self._paste_all_active and not peek:
             self._paste_all_active = False

@@ -110,18 +110,35 @@ def send_ctrl_v():
 
 
 def send_ctrl_v_fast():
-    """Fast Ctrl+V injection: force-release modifiers then send Ctrl+V immediately.
-    Used for sequential paste where the paste lock prevents race conditions."""
+    """Fast Ctrl+V injection using SendInput for sequential paste.
+    Does NOT release user's physical modifier keys — sends its own
+    independent Ctrl+V so holding Ctrl+Shift and spamming V works."""
     import time
-    release_all_modifiers()
-    time.sleep(0.01)
-    user32.keybd_event(VK_CONTROL, 0, 0, 0)
-    time.sleep(0.01)
-    user32.keybd_event(0x56, 0, 0, 0)  # V down
-    time.sleep(0.01)
-    user32.keybd_event(0x56, 0, KEYEVENTF_KEYUP, 0)  # V up
-    time.sleep(0.01)
-    user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+
+    # Build 4 INPUT structs: Ctrl down, V down, V up, Ctrl up
+    inputs = (INPUT * 4)()
+
+    inputs[0].type = INPUT_KEYBOARD
+    inputs[0].union.ki.wVk = VK_CONTROL
+    inputs[0].union.ki.dwFlags = 0
+
+    inputs[1].type = INPUT_KEYBOARD
+    inputs[1].union.ki.wVk = 0x56  # V
+    inputs[1].union.ki.dwFlags = 0
+
+    inputs[2].type = INPUT_KEYBOARD
+    inputs[2].union.ki.wVk = 0x56  # V
+    inputs[2].union.ki.dwFlags = KEYEVENTF_KEYUP
+
+    inputs[3].type = INPUT_KEYBOARD
+    inputs[3].union.ki.wVk = VK_CONTROL
+    inputs[3].union.ki.dwFlags = KEYEVENTF_KEYUP
+
+    # Zero out extra info pointers
+    for i in range(4):
+        inputs[i].union.ki.dwExtraInfo = ctypes.pointer(ctypes.c_ulong(0))
+
+    user32.SendInput(4, ctypes.byref(inputs), ctypes.sizeof(INPUT))
 
 
 def get_foreground_hwnd():

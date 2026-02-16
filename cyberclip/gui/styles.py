@@ -344,28 +344,35 @@ QToolTip {{
     font-size: 11px;
 }}
 
-/* ── Context Menu ────────────────────────────────────── */
+/* ── Context Menu (Windows 11 style) ─────────────────── */
 QMenu {{
-    background: #2C2C2E;
-    border: 1px solid rgba(255,255,255,0.15);
-    border-radius: 10px;
-    padding: 4px;
+    background: #2D2D30;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 8px;
+    padding: 4px 0px;
 }}
 QMenu::item {{
     background: transparent;
-    padding: 7px 24px 7px 12px;
-    border-radius: 6px;
-    margin: 1px 4px;
+    padding: 8px 32px 8px 14px;
+    border-radius: 4px;
+    margin: 2px 6px;
     color: {TEXT_PRIMARY};
+    font-size: 12px;
 }}
 QMenu::item:selected {{
-    background: rgba(79,124,255,0.18);
+    background: rgba(255,255,255,0.08);
     color: {TEXT_PRIMARY};
+}}
+QMenu::item:disabled {{
+    color: {TEXT_DIM};
 }}
 QMenu::separator {{
     height: 1px;
-    background: rgba(255,255,255,0.08);
-    margin: 4px 8px;
+    background: rgba(255,255,255,0.06);
+    margin: 4px 12px;
+}}
+QMenu::icon {{
+    padding-left: 8px;
 }}
 
 /* ── Settings Dialog ─────────────────────────────────── */

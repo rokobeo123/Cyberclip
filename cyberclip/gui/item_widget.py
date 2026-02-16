@@ -5,7 +5,8 @@ from datetime import datetime
 
 from PyQt6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton,
-    QGraphicsOpacityEffect, QApplication, QMenu, QSizePolicy,
+    QGraphicsOpacityEffect, QGraphicsDropShadowEffect,
+    QApplication, QMenu, QSizePolicy,
 )
 from PyQt6.QtCore import (
     Qt, pyqtSignal, QPropertyAnimation, QEasingCurve,
@@ -419,6 +420,14 @@ class ClipItemWidget(QWidget):
 
     def _show_context_menu(self, pos):
         menu = QMenu(self)
+        menu.setWindowFlags(menu.windowFlags() | Qt.WindowType.NoDropShadowWindowHint)
+        menu.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        # Add drop shadow for Windows 11-style elevated look
+        shadow = QGraphicsDropShadowEffect(menu)
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 4)
+        shadow.setColor(QColor(0, 0, 0, 120))
+        menu.setGraphicsEffect(shadow)
         menu.addAction("▶ Bắt đầu từ đây", lambda: self.start_from_here.emit(self.item))
         menu.addSeparator()
         menu.addAction("📋 Dán", lambda: self.paste_requested.emit(self.item))
