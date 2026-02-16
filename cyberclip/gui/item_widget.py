@@ -216,14 +216,14 @@ class ClipItemWidget(QWidget):
             first_line += "…"
         extra = ""
         if len(lines) > 1:
-            extra = f"  (+{len(lines)-1} dòng)"
+            extra = f"  ({t('lines_more', count=len(lines)-1)})"
         display = first_line + extra
         self.content_label = QLabel(display)
         self.content_label.setObjectName("ClipContent")
         self.content_label.setWordWrap(False)
         self.content_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.content_label.setMaximumHeight(20)
-        self.content_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        self.content_label.setFixedHeight(22)
+        self.content_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout.addWidget(self.content_label)
 
         # Expanded full content (hidden by default)

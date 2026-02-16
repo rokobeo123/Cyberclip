@@ -124,7 +124,7 @@ class MainWindow(QMainWindow):
             self.move(self.settings.window_x, self.settings.window_y)
             self.resize(self.settings.window_width, self.settings.window_height)
         else:
-            self.resize(420, 680)
+            self.resize(1000, 700)
             self._center_on_screen()
 
         # Enable DWM blur on Win11

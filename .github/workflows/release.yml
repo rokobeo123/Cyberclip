@@ -25,7 +25,8 @@ jobs:
           pip install pyinstaller
 
       - name: Build exe
-        run: pyinstaller --noconfirm CyberClip.spec
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed --name CyberClip --add-data "cyberclip;cyberclip" main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

@@ -1,81 +1,80 @@
-# CyberClip 📋
+# CyberClip
 
-**Trình quản lý clipboard thông minh cho Windows** — sao chép nhiều mục, dán tuần tự theo thứ tự FIFO/LIFO, hỗ trợ ảnh, OCR, và nhiều tính năng khác.
+**Smart clipboard manager for Windows** — copy multiple items, paste sequentially in FIFO/LIFO order, with image support, OCR, and more.
 
-![Windows](https://img.shields.io/badge/Windows-10%2F11-blue?logo=windows)
-![Python](https://img.shields.io/badge/Python-3.12-yellow?logo=python)
-![License](https://img.shields.io/badge/License-MIT-green)
+Supports **English** and **Vietnamese** (Tiếng Việt).
 
 ---
 
-## ✨ Tính năng chính
+## Features
 
-| Tính năng | Mô tả |
-|-----------|-------|
-| 📋 **Lịch sử clipboard** | Tự động lưu mọi thứ bạn sao chép (văn bản, ảnh, file, URL, mã màu) |
-| 🔄 **Dán tuần tự (Magazine)** | FIFO hoặc LIFO — dán xong tự chuyển sang mục tiếp theo |
-| 🖼️ **Hỗ trợ ảnh** | Xem thumbnail, phóng to/thu nhỏ, kéo thả |
-| 🔍 **OCR** | Quét chữ từ ảnh (cần Tesseract) |
-| 📌 **Ghim mục quan trọng** | Không bị xóa khi dọn dẹp |
-| 🔎 **Tìm kiếm** | Tìm nhanh trong lịch sử |
-| ⌨️ **Phím tắt toàn cục** | Ctrl+Shift+V dán tuần tự, tùy chỉnh được |
-| 🎨 **Giao diện tối hiện đại** | Thiết kế minimalist, hỗ trợ 4K |
-| 🇻🇳 **Tiếng Việt** | Giao diện hoàn toàn bằng tiếng Việt |
+| Feature | Description |
+|---------|-------------|
+| Clipboard History | Automatically saves everything you copy (text, images, files, URLs, color codes) |
+| Sequential Paste (Magazine) | FIFO or LIFO — paste one item and auto-advance to the next |
+| Image Support | View thumbnails, zoom in/out, copy images |
+| OCR | Extract text from images (requires Tesseract) |
+| Pin Important Items | Pinned items are never deleted during cleanup |
+| Search | Quickly find items in your history |
+| Global Hotkeys | Ctrl+Shift+V for sequential paste, fully customizable |
+| Modern Dark UI | Minimalist design, supports 4K displays |
+| Bilingual | English and Vietnamese interface |
+| Ghost Mode | Instantly stop recording clipboard activity |
+| Drag & Drop | Reorder clips by dragging them |
+| Paste All | Paste entire queue at once with one hotkey |
 
-## 📥 Cài đặt
+## Installation
 
-### Cách 1: Tải file .exe (Khuyên dùng)
+### Option 1: Download .exe (Recommended)
 
-1. Vào trang [Releases](../../releases)
-2. Tải file `CyberClip.exe`
-3. Chạy trực tiếp — không cần cài đặt gì thêm
+1. Go to the [Releases](../../releases) page
+2. Download `CyberClip.exe`
+3. Run it directly — no installation needed
 
-> **Lưu ý:** Windows SmartScreen có thể cảnh báo vì file chưa được ký số. Nhấn "More info" → "Run anyway".
+> **Note:** Windows SmartScreen may warn because the file is not digitally signed. Click "More info" → "Run anyway".
 
-### Cách 2: Chạy từ source code
+### Option 2: Run from source
 
 ```bash
-# Yêu cầu: Python 3.12+
+# Requires Python 3.12+
 git clone https://github.com/YOUR_USERNAME/CyberClip.git
 cd CyberClip
 pip install -r requirements.txt
 python main.py
 ```
 
-### Cách 3: Tự build exe
+### Option 3: Build exe yourself
 
 ```bash
 pip install pyinstaller
-pyinstaller CyberClip.spec
-# File exe sẽ ở thư mục dist/
+pyinstaller --noconfirm --clean --onefile --windowed --name CyberClip --add-data "cyberclip;cyberclip" main.py
+# The exe will be in the dist/ folder
 ```
 
-## ⌨️ Phím tắt mặc định
+## Default Hotkeys
 
-| Phím tắt | Chức năng |
-|----------|-----------|
-| `Ctrl+Shift+V` | Dán tuần tự (dán & chuyển mục tiếp) |
-| `Ctrl+Shift+S` | Hiện/Ẩn CyberClip |
-| `Ctrl+Shift+N` | Bỏ qua mục, chuyển tiếp |
-| `Ctrl+Shift+G` | Bật/Tắt chế độ ẩn |
-| `Enter` | Sao chép mục đã chọn |
-| `↑ / ↓` | Di chuyển giữa các mục |
-| `Delete` | Xóa mục |
-| `Ctrl+P` | Ghim / Bỏ ghim |
-| `Ctrl+F` | Tìm kiếm |
-| `Escape` | Ẩn cửa sổ |
+| Hotkey | Action |
+|--------|--------|
+| `Ctrl+Shift+V` | Sequential paste (paste & advance) |
+| `Ctrl+Shift+A` | Paste all remaining items |
+| `Ctrl+Shift+S` | Show / Hide CyberClip |
+| `Ctrl+Shift+N` | Skip to next item |
+| `Ctrl+Shift+G` | Toggle ghost mode |
+| `Enter` | Copy selected item |
+| `↑ / ↓` | Navigate between items |
+| `Delete` | Delete item |
+| `Ctrl+P` | Pin / Unpin |
+| `Ctrl+F` | Search |
+| `Escape` | Hide window / Stop batch paste |
 
-> Tất cả phím tắt toàn cục có thể thay đổi trong Cài đặt → Phím tắt.
+> All global hotkeys can be customized in Settings → Hotkeys.
 
-## 🖼️ Cấu trúc dự án
+## Project Structure
 
 ```
 CyberClip/
 ├── main.py                 # Entry point
-├── CyberClip.spec          # PyInstaller config
 ├── requirements.txt        # Dependencies
-├── assets/
-│   └── icon.ico           # App icon
 ├── cyberclip/
 │   ├── app.py             # Application bootstrap
 │   ├── core/              # Business logic
@@ -84,38 +83,34 @@ CyberClip/
 │   │   ├── global_hotkeys.py
 │   │   ├── safety_net.py
 │   │   ├── ocr_scanner.py
-│   │   ├── text_cleaner.py
-│   │   ├── photo_fixer.py
-│   │   ├── link_cleaner.py
-│   │   ├── color_detector.py
-│   │   └── app_detector.py
+│   │   └── ...
 │   ├── gui/               # UI components
 │   │   ├── main_window.py
 │   │   ├── item_widget.py
 │   │   ├── image_viewer.py
-│   │   ├── hud_widget.py
-│   │   ├── tab_bar.py
-│   │   ├── choice_menu.py
 │   │   ├── settings_dialog.py
-│   │   └── styles.py
+│   │   ├── styles.py
+│   │   └── ...
 │   ├── storage/           # Database & file storage
 │   │   ├── database.py
 │   │   ├── image_store.py
 │   │   └── models.py
 │   └── utils/             # Utilities
 │       ├── constants.py
+│       ├── i18n.py
 │       └── win32_helpers.py
-└── version_info.py
+└── .github/workflows/
+    └── release.yml         # Auto-build on tag push
 ```
 
-## 🛠️ Công nghệ
+## Tech Stack
 
 - **Python 3.12** + **PyQt6** — GUI framework
 - **pywin32** — Windows API integration
-- **Pillow** — Xử lý ảnh
-- **SQLite** — Lưu trữ dữ liệu
-- **PyInstaller** — Build standalone exe
+- **Pillow** — Image processing
+- **SQLite** — Data storage
+- **PyInstaller** — Standalone exe packaging
 
-## 📝 License
+## License
 
-MIT License — xem file [LICENSE](LICENSE).
+MIT License — see [LICENSE](LICENSE).
