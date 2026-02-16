@@ -1,6 +1,6 @@
 # CyberClip
 
-**Smart clipboard manager for Windows** — copy multiple items, paste sequentially in FIFO/LIFO order, with image support, OCR, and more.
+**Smart clipboard manager for Windows** — copy multiple items, paste sequentially in FIFO/LIFO order, with image support, and more.
 
 Supports **English** and **Vietnamese** (Tiếng Việt).
 
