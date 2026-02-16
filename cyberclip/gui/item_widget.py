@@ -238,10 +238,10 @@ class ClipItemWidget(QWidget):
         self._content_widgets.append(self.full_content_label)
 
     def _setup_image_content(self, layout):
-        # Large thumbnail preview
+        # Compact thumbnail preview
         self.thumb_label = QLabel()
-        self.thumb_label.setMinimumHeight(60)
-        self.thumb_label.setMaximumHeight(120)
+        self.thumb_label.setMinimumHeight(32)
+        self.thumb_label.setMaximumHeight(56)
         self.thumb_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.thumb_label.setStyleSheet(
             "border-radius: 6px; border: 1px solid rgba(255,255,255,0.08); "
@@ -253,12 +253,12 @@ class ClipItemWidget(QWidget):
             pix = QPixmap(self.item.image_path)
             if not pix.isNull():
                 scaled = pix.scaled(
-                    280, 110,
+                    280, 50,
                     Qt.AspectRatioMode.KeepAspectRatio,
                     Qt.TransformationMode.SmoothTransformation
                 )
                 self.thumb_label.setPixmap(scaled)
-                self.thumb_label.setFixedHeight(min(scaled.height() + 6, 120))
+                self.thumb_label.setFixedHeight(min(scaled.height() + 6, 56))
         layout.addWidget(self.thumb_label)
         self._content_widgets.append(self.thumb_label)
 
@@ -437,11 +437,8 @@ class ClipItemWidget(QWidget):
         menu.addAction(t("ctx_start_here"), lambda: self.start_from_here.emit(self.item))
         menu.addSeparator()
         menu.addAction(t("ctx_paste"), lambda: self.paste_requested.emit(self.item))
+        menu.addAction(t("ctx_copy"), lambda: self._copy_to_clipboard())
         menu.addAction(t("ctx_pin"), lambda: self.pin_toggled.emit(self.item))
-
-        if self.item.content_type in (TYPE_TEXT, TYPE_URL):
-            menu.addSeparator()
-            menu.addAction(t("ctx_copy"), lambda: self._copy_to_clipboard())
 
         if self.item.content_type == TYPE_IMAGE:
             menu.addSeparator()
@@ -459,4 +456,9 @@ class ClipItemWidget(QWidget):
 
     def _copy_to_clipboard(self):
         clipboard = QApplication.clipboard()
-        clipboard.setText(self.item.text_content)
+        if self.item.content_type == TYPE_IMAGE and self.item.image_path:
+            pix = QPixmap(self.item.image_path)
+            if not pix.isNull():
+                clipboard.setPixmap(pix)
+                return
+        clipboard.setText(self.item.text_content or self.item.preview or "")

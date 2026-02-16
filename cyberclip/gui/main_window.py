@@ -71,6 +71,7 @@ class MainWindow(QMainWindow):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setObjectName("CyberClipMain")
         self.setMinimumSize(380, 500)
+        self.setMouseTracking(True)
 
         # Initialize subsystems
         self.db = Database()
@@ -132,6 +133,7 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         central = QWidget()
         central.setObjectName("CentralWidget")
+        central.setMouseTracking(True)
         self.setCentralWidget(central)
 
         main_layout = QVBoxLayout(central)
