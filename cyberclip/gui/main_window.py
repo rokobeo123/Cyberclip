@@ -671,9 +671,10 @@ class MainWindow(QMainWindow):
 
             QTimer.singleShot(60, self._after_paste)
         except Exception:
-            # Bug fix: always release the lock so future pastes are not blocked
+            # Always continue the chain — _after_paste handles lock release and
+            # paste_all continuation. Without this, paste_all stops silently on error.
             self._paste_busy = False
-            self.monitor.resume()
+            QTimer.singleShot(0, self._after_paste)
 
     def _after_paste(self):
         # Don't resume monitoring immediately — give clipboard time to settle
@@ -694,7 +695,9 @@ class MainWindow(QMainWindow):
             self._paste_queued -= 1
             QTimer.singleShot(20, self._sequential_paste)
         elif self._paste_all_active and peek:
-            QTimer.singleShot(100, self._sequential_paste)
+            # 300ms > the 200ms monitor.resume() delay — avoids race where monitor
+            # is unpaused mid-paste and recaptures our own clipboard content
+            QTimer.singleShot(300, self._sequential_paste)
         elif self._paste_all_active and not peek:
             self._paste_all_active = False
 
