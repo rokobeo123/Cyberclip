@@ -94,6 +94,7 @@ class MainWindow(QMainWindow):
         self._paste_all_active = False  # paste-all queue mode
         self._paste_all_total = 0       # total items in current paste-all run
         self._paste_all_done = 0        # items pasted so far in paste-all run
+        self._paste_item_is_image = False  # True when current paste item is an image
 
         # Clipboard monitor (create before UI setup so _apply_settings works)
         self.monitor = ClipboardMonitor(self.image_store)
@@ -616,9 +617,15 @@ class MainWindow(QMainWindow):
                         mime = QMimeData()
                         mime.setImageData(img)
                         clipboard.setMimeData(mime)
+                        # Force Qt to flush the image data into Win32 clipboard now.
+                        # Without this, Qt may defer the write (lazy rendering) and the
+                        # image won't be in the clipboard when Ctrl+V fires.
+                        QApplication.processEvents()
+                        self._paste_item_is_image = True
                     else:
                         # Image failed to load — skip item but keep chain alive
                         self._paste_busy = False
+                        self._paste_item_is_image = False
                         QTimer.singleShot(0, self._after_paste)
                         return
                 else:
@@ -626,6 +633,7 @@ class MainWindow(QMainWindow):
                     if self.settings.strip_formatting:
                         text = to_plain_text(text)
                     clipboard.setText(text)
+                    self._paste_item_is_image = False
 
                 # Highlight current item in list (inside try so widget errors don't deadlock)
                 self._highlight_magazine_item()
@@ -633,12 +641,14 @@ class MainWindow(QMainWindow):
             except Exception:
                 # Clipboard/widget error — skip item but keep chain alive
                 self._paste_busy = False
+                self._paste_item_is_image = False
                 QTimer.singleShot(0, self._after_paste)
                 return
 
-            # 100ms lets the clipboard settle and the event loop breathe
-            # before Ctrl+V is injected into the target app
-            QTimer.singleShot(100, self._do_inject_paste)
+            # Images need longer to settle in clipboard (Win32 lazy rendering).
+            # Text is ready in 100ms; images need ~300ms to be reliably available.
+            settle_ms = 300 if self._paste_item_is_image else 100
+            QTimer.singleShot(settle_ms, self._do_inject_paste)
 
         except Exception:
             # Outer safety net — always release lock so hotkeys stay alive
@@ -747,12 +757,15 @@ class MainWindow(QMainWindow):
                 self._target_hwnd = None
                 QTimer.singleShot(20, self._sequential_paste)
             elif self._paste_all_active and peek:
-                # 300ms > the 200ms monitor.resume() delay — avoids race where monitor
-                # is unpaused mid-paste and recaptures our own clipboard content
-                QTimer.singleShot(300, self._sequential_paste)
+                # Images need more time between pastes: target app is slower to absorb
+                # a large image than a text string. Use 600ms for images, 300ms for text.
+                # Both values exceed the 200ms monitor.resume() delay to avoid recapture.
+                inter_delay = 600 if self._paste_item_is_image else 300
+                QTimer.singleShot(inter_delay, self._sequential_paste)
             else:
                 # End of chain — clear target and paste_all flag
                 self._target_hwnd = None
+                self._paste_item_is_image = False
                 if self._paste_all_active:
                     self._paste_all_active = False
                     self._paste_all_total = 0
@@ -765,6 +778,7 @@ class MainWindow(QMainWindow):
             self._target_hwnd = None
             self._paste_all_total = 0
             self._paste_all_done = 0
+            self._paste_item_is_image = False
             self._paste_watchdog.stop()
 
     def _on_paste_watchdog(self):
@@ -776,6 +790,7 @@ class MainWindow(QMainWindow):
         self._target_hwnd = None
         self._paste_all_total = 0
         self._paste_all_done = 0
+        self._paste_item_is_image = False
         self.monitor.resume()
         msg = t("paste_timeout")
         self.hud.notify(msg, 3000)
