@@ -593,29 +593,36 @@ class MainWindow(QMainWindow):
         self._paste_busy = True
         self.monitor.pause()
 
-        clipboard = QApplication.clipboard()
-        if item.content_type == TYPE_IMAGE and item.image_path and os.path.exists(item.image_path):
-            img = QImage(item.image_path)
-            if not img.isNull():
-                mime = QMimeData()
-                mime.setImageData(img)
-                clipboard.setMimeData(mime)
+        try:
+            clipboard = QApplication.clipboard()
+            if item.content_type == TYPE_IMAGE and item.image_path and os.path.exists(item.image_path):
+                img = QImage(item.image_path)
+                if not img.isNull():
+                    mime = QMimeData()
+                    mime.setImageData(img)
+                    clipboard.setMimeData(mime)
+                else:
+                    # Image failed to load — skip item but keep chain alive
+                    self._paste_busy = False
+                    QTimer.singleShot(0, self._after_paste)
+                    return
             else:
-                # Bug fix: image failed to load — release lock and skip inject
-                self._paste_busy = False
-                self.monitor.resume()
-                return
-        else:
-            text = item.text_content
-            if self.settings.strip_formatting:
-                text = to_plain_text(text)
-            clipboard.setText(text)
+                text = item.text_content
+                if self.settings.strip_formatting:
+                    text = to_plain_text(text)
+                clipboard.setText(text)
+        except Exception:
+            # Clipboard set failed — skip item but keep chain alive
+            self._paste_busy = False
+            QTimer.singleShot(0, self._after_paste)
+            return
 
         # Highlight current item in list
         self._highlight_magazine_item()
 
-        # Inject Ctrl+V after a short delay for clipboard sync
-        QTimer.singleShot(30, self._do_inject_paste)
+        # 100ms lets the clipboard settle and the event loop breathe
+        # before Ctrl+V is injected into the target app
+        QTimer.singleShot(100, self._do_inject_paste)
 
     @pyqtSlot(ClipboardItem)
     def _paste_and_inject(self, item: ClipboardItem):
@@ -863,10 +870,14 @@ class MainWindow(QMainWindow):
 
     def _paste_all(self):
         """Paste ALL remaining items in the queue sequentially."""
-        if self._paste_busy or self._paste_all_active:
+        # Toggle: if already running, cancel it
+        if self._paste_all_active:
             self._paste_all_active = False
             self.status_label.setText(t("paste_all_stop"))
             QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
+            return
+        # Don't start a new paste_all while a single paste is mid-flight
+        if self._paste_busy:
             return
         if not self.magazine.peek():
             self.status_label.setText(t("queue_empty"))
