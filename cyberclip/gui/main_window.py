@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QScrollArea, QApplication,
     QSizePolicy, QSystemTrayIcon, QMenu, QGraphicsOpacityEffect,
-    QGraphicsDropShadowEffect,
+    QGraphicsDropShadowEffect, QSpinBox,
 )
 from PyQt6.QtCore import (
     Qt, pyqtSignal, pyqtSlot, QTimer, QPropertyAnimation,
@@ -262,6 +262,27 @@ class MainWindow(QMainWindow):
         tb2_layout.addWidget(self.tab_btn)
 
         tb2_layout.addStretch()
+
+        # Paste-all count spinbox (items per Ctrl+Shift+A; 0 = all)
+        _pac_label = QLabel("×")
+        _pac_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; background: transparent;")
+        _pac_label.setToolTip(t("paste_all_count_tooltip"))
+        tb2_layout.addWidget(_pac_label)
+
+        self.paste_count_spin = QSpinBox()
+        self.paste_count_spin.setRange(0, 99)
+        self.paste_count_spin.setSpecialValueText("∞")
+        self.paste_count_spin.setValue(getattr(self.settings, 'paste_all_count', 0))
+        self.paste_count_spin.setFixedWidth(52)
+        self.paste_count_spin.setFixedHeight(26)
+        self.paste_count_spin.setToolTip(t("paste_all_count_tooltip"))
+        self.paste_count_spin.setStyleSheet(
+            "QSpinBox { background: #2C2C2E; border: 1px solid rgba(255,255,255,0.1); "
+            "border-radius: 5px; padding: 0 4px; color: #E0E0E0; font-size: 12px; }"
+            "QSpinBox::up-button, QSpinBox::down-button { width: 14px; }"
+        )
+        self.paste_count_spin.valueChanged.connect(self._on_paste_count_changed)
+        tb2_layout.addWidget(self.paste_count_spin)
 
         # Reset queue button
         self._reset_btn = QPushButton("\uf0e2")  # rotate-left icon
@@ -746,7 +767,7 @@ class MainWindow(QMainWindow):
             # Build status message
             if self._paste_all_active and self._paste_all_total > 0:
                 remaining = self._paste_all_total - self._paste_all_done
-                if peek:
+                if peek and remaining > 0:
                     msg = t("paste_all_progress",
                             done=self._paste_all_done,
                             total=self._paste_all_total,
@@ -767,7 +788,13 @@ class MainWindow(QMainWindow):
                 self._paste_queued -= 1
                 self._target_hwnd = None
                 QTimer.singleShot(20, self._sequential_paste)
-            elif self._paste_all_active and peek:
+            elif self._paste_all_active and peek and self._paste_all_done < self._paste_all_total:
+                # Images need more time between pastes: target app is slower to absorb
+                # a large image than a text string. Use 2x paste_delay for images.
+                # Both values must exceed the 200ms monitor.resume() delay to avoid recapture.
+                base_delay = max(getattr(self.settings, 'paste_delay_ms', 500), 300)
+                inter_delay = base_delay * 2 if self._paste_item_is_image else base_delay
+                QTimer.singleShot(inter_delay, self._sequential_paste)
                 # Images need more time between pastes: target app is slower to absorb
                 # a large image than a text string. Use 2x paste_delay for images.
                 # Both values must exceed the 200ms monitor.resume() delay to avoid recapture.
@@ -996,9 +1023,16 @@ class MainWindow(QMainWindow):
 
         self._paste_all_active = True
         self._paste_all_done = 0
-        self._paste_all_total = self.magazine.remaining
+        limit = getattr(self.settings, 'paste_all_count', 0)
+        total = self.magazine.remaining
+        self._paste_all_total = min(total, limit) if limit > 0 else total
         self.hud.notify(t("paste_all_start", count=self._paste_all_total), 3000)
         self._sequential_paste()
+
+    def _on_paste_count_changed(self, value: int):
+        """Save paste-all count when spinbox changes."""
+        self.settings.paste_all_count = value
+        self.db.save_setting("paste_all_count", value)
 
     def _skip_magazine(self):
         """Skip current magazine item without pasting."""
@@ -1257,6 +1291,11 @@ class MainWindow(QMainWindow):
         self.tab_btn.setChecked(self.settings.auto_tab)
         self.ghost_btn.setChecked(self.settings.ghost_mode)
         self.ghost_indicator.setVisible(self.settings.ghost_mode)
+
+        # Sync paste count spinbox without triggering _on_paste_count_changed
+        self.paste_count_spin.blockSignals(True)
+        self.paste_count_spin.setValue(getattr(self.settings, 'paste_all_count', 0))
+        self.paste_count_spin.blockSignals(False)
 
         # App detector rules
         rules = self.db.get_tab_rules()

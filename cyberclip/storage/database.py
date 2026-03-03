@@ -192,6 +192,7 @@ class Database:
             "window_height": settings.window_height,
             "paste_delay_ms": settings.paste_delay_ms,
             "max_items": settings.max_items,
+            "paste_all_count": settings.paste_all_count,
         }
         for k, v in data.items():
             self.save_setting(k, v)
@@ -215,6 +216,7 @@ class Database:
         s.window_height = self.get_setting("window_height", 680)
         s.paste_delay_ms = self.get_setting("paste_delay_ms", 500)
         s.max_items = self.get_setting("max_items", 200)
+        s.paste_all_count = self.get_setting("paste_all_count", 0)
         return s
 
     # Tab rules

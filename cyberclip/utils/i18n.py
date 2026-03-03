@@ -44,6 +44,8 @@ _STRINGS = {
         "paste_delay_tooltip": "Thời gian chờ giữa mỗi lần dán khi dán hàng loạt. Tăng lên nếu bị mất nội dung (ví dụ: Gemini, ChatGPT). Mặc định: 500ms",
         "max_items": "Số mục tối đa mỗi tab:",
         "max_items_tooltip": "Khi vượt quá giới hạn, các mục cũ nhất (không ghim) sẽ tự động bị xóa. Mặc định: 200",
+        "paste_all_count": "Số mục mỗi lần (Ctrl+Shift+A):",
+        "paste_all_count_tooltip": "Số mục dán mỗi lần nhấn Ctrl+Shift+A. 0 (∞) = dán tất cả còn lại.",
 
         # Toolbar / Main window
         "search_placeholder": "Tìm kiếm…",
@@ -169,6 +171,8 @@ _STRINGS = {
         "paste_delay_tooltip": "Wait time between each item in paste-all. Increase if items are missed (e.g. Gemini, ChatGPT). Default: 500ms",
         "max_items": "Max items per tab:",
         "max_items_tooltip": "Oldest unpinned items are auto-removed when this limit is exceeded. Default: 200",
+        "paste_all_count": "Items per Ctrl+Shift+A:",
+        "paste_all_count_tooltip": "Number of items pasted per Ctrl+Shift+A press. 0 (∞) = paste all remaining.",
 
         "search_placeholder": "Search…",
         "reset_queue": "Reset queue",

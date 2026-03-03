@@ -60,3 +60,4 @@ class AppSettings:
     window_height: int = 680
     paste_delay_ms: int = 500  # inter-paste delay for paste-all (ms); increase for slow web apps
     max_items: int = 200       # maximum items kept per tab (oldest unpinned removed first)
+    paste_all_count: int = 0   # items per Ctrl+Shift+A press (0 = all remaining)
