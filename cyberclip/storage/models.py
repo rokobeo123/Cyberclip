@@ -58,3 +58,4 @@ class AppSettings:
     window_y: int = -1
     window_width: int = 420
     window_height: int = 680
+    paste_delay_ms: int = 500  # inter-paste delay for paste-all (ms); increase for slow web apps

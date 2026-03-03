@@ -2,7 +2,7 @@
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QWidget,
     QLabel, QLineEdit, QPushButton, QCheckBox,
-    QComboBox, QGroupBox, QFormLayout,
+    QComboBox, QGroupBox, QFormLayout, QSpinBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QKeySequence
@@ -134,6 +134,13 @@ class SettingsDialog(QDialog):
         self.super_paste_check = QCheckBox(t("super_paste"))
         gen_layout.addRow(self.super_paste_check)
 
+        self.paste_delay_spin = QSpinBox()
+        self.paste_delay_spin.setRange(100, 3000)
+        self.paste_delay_spin.setSingleStep(100)
+        self.paste_delay_spin.setSuffix(" ms")
+        self.paste_delay_spin.setToolTip(t("paste_delay_tooltip"))
+        gen_layout.addRow(t("paste_delay"), self.paste_delay_spin)
+
         tabs.addTab(general_tab, t("tab_general"))
 
         # ── Hotkeys tab ──
@@ -230,6 +237,7 @@ class SettingsDialog(QDialog):
         self.auto_enter_check.setChecked(s.auto_enter)
         self.auto_tab_check.setChecked(s.auto_tab)
         self.super_paste_check.setChecked(s.super_paste_enabled)
+        self.paste_delay_spin.setValue(getattr(s, 'paste_delay_ms', 500))
 
         # Load hotkeys
         hotkeys = dict(DEFAULT_HOTKEYS)
@@ -247,6 +255,7 @@ class SettingsDialog(QDialog):
         s.auto_enter = self.auto_enter_check.isChecked()
         s.auto_tab = self.auto_tab_check.isChecked()
         s.super_paste_enabled = self.super_paste_check.isChecked()
+        s.paste_delay_ms = self.paste_delay_spin.value()
 
         # Save hotkeys
         hotkeys = {}

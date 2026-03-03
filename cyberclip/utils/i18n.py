@@ -40,8 +40,8 @@ _STRINGS = {
         "reset_hotkeys": "Đặt lại phím tắt mặc định",
 
         # Buttons
-        "btn_cancel": "Hủy",
-        "btn_save": "💾  Lưu",
+        "paste_delay": "Độ trễ giữa các lần dán:",
+        "paste_delay_tooltip": "Thời gian chờ giữa mỗi lần dán khi dán hàng loạt. Tăng lên nếu bị mất nội dung (ví dụ: Gemini, ChatGPT). Mặc định: 500ms",
 
         # Toolbar / Main window
         "search_placeholder": "Tìm kiếm…",
@@ -151,8 +151,8 @@ _STRINGS = {
         "shortcut_escape": "Hide / Stop batch paste",
         "reset_hotkeys": "Reset hotkeys to defaults",
 
-        "btn_cancel": "Cancel",
-        "btn_save": "💾  Save",
+        "paste_delay": "Paste delay:",
+        "paste_delay_tooltip": "Wait time between each item in paste-all. Increase if items are missed (e.g. Gemini, ChatGPT). Default: 500ms",
 
         "search_placeholder": "Search…",
         "reset_queue": "Reset queue",

@@ -694,7 +694,9 @@ class MainWindow(QMainWindow):
             # Restore focus to the original target window when CyberClip was opened
             if self._target_hwnd:
                 set_foreground(self._target_hwnd)
-                time.sleep(0.05)
+                # Give browser/web apps more time to restore focus to the active input
+                # element after the window receives WM_SETFOCUS (50ms is not enough)
+                time.sleep(0.15)
 
             send_ctrl_v_fast()
 
@@ -758,9 +760,10 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(20, self._sequential_paste)
             elif self._paste_all_active and peek:
                 # Images need more time between pastes: target app is slower to absorb
-                # a large image than a text string. Use 600ms for images, 300ms for text.
-                # Both values exceed the 200ms monitor.resume() delay to avoid recapture.
-                inter_delay = 600 if self._paste_item_is_image else 300
+                # a large image than a text string. Use 2x paste_delay for images.
+                # Both values must exceed the 200ms monitor.resume() delay to avoid recapture.
+                base_delay = max(getattr(self.settings, 'paste_delay_ms', 500), 300)
+                inter_delay = base_delay * 2 if self._paste_item_is_image else base_delay
                 QTimer.singleShot(inter_delay, self._sequential_paste)
             else:
                 # End of chain — clear target and paste_all flag

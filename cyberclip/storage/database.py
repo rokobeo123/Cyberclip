@@ -190,6 +190,7 @@ class Database:
             "window_y": settings.window_y,
             "window_width": settings.window_width,
             "window_height": settings.window_height,
+            "paste_delay_ms": settings.paste_delay_ms,
         }
         for k, v in data.items():
             self.save_setting(k, v)
@@ -211,6 +212,7 @@ class Database:
         s.window_y = self.get_setting("window_y", -1)
         s.window_width = self.get_setting("window_width", 420)
         s.window_height = self.get_setting("window_height", 680)
+        s.paste_delay_ms = self.get_setting("paste_delay_ms", 500)
         return s
 
     # Tab rules
