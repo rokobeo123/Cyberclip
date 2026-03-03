@@ -46,7 +46,7 @@ class Database:
         """)
         self.conn.commit()
 
-    def add_item(self, item: ClipboardItem) -> int:
+    def add_item(self, item: ClipboardItem, max_items: int = MAX_ITEMS_PER_TAB) -> int:
         cur = self.conn.execute(
             """INSERT INTO items (content_type, text_content, image_path,
                source_app, tab, pinned, created_at, extra_data)
@@ -57,15 +57,15 @@ class Database:
         )
         self.conn.commit()
         item.id = cur.lastrowid
-        self._enforce_limit(item.tab)
+        self._enforce_limit(item.tab, max_items)
         return item.id
 
-    def _enforce_limit(self, tab: str):
+    def _enforce_limit(self, tab: str, max_items: int = MAX_ITEMS_PER_TAB):
         count = self.conn.execute(
             "SELECT COUNT(*) FROM items WHERE tab=?", (tab,)
         ).fetchone()[0]
-        if count > MAX_ITEMS_PER_TAB:
-            excess = count - MAX_ITEMS_PER_TAB
+        if count > max_items:
+            excess = count - max_items
             self.conn.execute(
                 """DELETE FROM items WHERE id IN (
                     SELECT id FROM items
@@ -191,6 +191,7 @@ class Database:
             "window_width": settings.window_width,
             "window_height": settings.window_height,
             "paste_delay_ms": settings.paste_delay_ms,
+            "max_items": settings.max_items,
         }
         for k, v in data.items():
             self.save_setting(k, v)
@@ -213,6 +214,7 @@ class Database:
         s.window_width = self.get_setting("window_width", 420)
         s.window_height = self.get_setting("window_height", 680)
         s.paste_delay_ms = self.get_setting("paste_delay_ms", 500)
+        s.max_items = self.get_setting("max_items", 200)
         return s
 
     # Tab rules

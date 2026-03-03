@@ -124,7 +124,7 @@ class ClipItemWidget(QWidget):
             if char_count > 100:
                 meta_parts.append(f"{word_count}w · {line_count}L · {char_count}ch")
             else:
-                meta_parts.append(f"{word_count} từ")
+                meta_parts.append(t("words", count=word_count))
 
         if meta_parts:
             self.meta_label = QLabel("  ·  ".join(meta_parts))
@@ -142,7 +142,7 @@ class ClipItemWidget(QWidget):
         self.collapse_btn = QPushButton(self.ICON_EXPAND)
         self.collapse_btn.setObjectName("ClipAction")
         self.collapse_btn.setFixedSize(28, 28)
-        self.collapse_btn.setToolTip("Mở rộng")
+        self.collapse_btn.setToolTip(t("expand"))
         self.collapse_btn.clicked.connect(self._toggle_collapse)
         actions_layout.addWidget(self.collapse_btn)
 
@@ -201,7 +201,7 @@ class ClipItemWidget(QWidget):
         del_btn = QPushButton(self.ICON_DELETE)
         del_btn.setObjectName("ClipAction")
         del_btn.setFixedSize(28, 28)
-        del_btn.setToolTip("Xóa")
+        del_btn.setToolTip(t("delete"))
         del_btn.clicked.connect(lambda: self.delete_requested.emit(self.item))
         actions_layout.addWidget(del_btn)
 
@@ -307,7 +307,7 @@ class ClipItemWidget(QWidget):
             for w in self._content_widgets:
                 w.setVisible(True)
             self.collapse_btn.setText(self.ICON_COLLAPSE)
-            self.collapse_btn.setToolTip("Thu gọn")
+            self.collapse_btn.setToolTip(t("collapse"))
         else:
             # Collapsed/compact state: show compact preview, hide full content
             if hasattr(self, 'content_label'):
@@ -315,7 +315,7 @@ class ClipItemWidget(QWidget):
             for w in self._content_widgets:
                 w.setVisible(False)
             self.collapse_btn.setText(self.ICON_EXPAND)
-            self.collapse_btn.setToolTip("Mở rộng")
+            self.collapse_btn.setToolTip(t("expand"))
 
     def _setup_animation(self):
         self._opacity_effect = QGraphicsOpacityEffect(self)

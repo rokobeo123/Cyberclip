@@ -141,6 +141,13 @@ class SettingsDialog(QDialog):
         self.paste_delay_spin.setToolTip(t("paste_delay_tooltip"))
         gen_layout.addRow(t("paste_delay"), self.paste_delay_spin)
 
+        self.max_items_spin = QSpinBox()
+        self.max_items_spin.setRange(50, 2000)
+        self.max_items_spin.setSingleStep(50)
+        self.max_items_spin.setSuffix(f" {t('items_count', count='').strip()}")
+        self.max_items_spin.setToolTip(t("max_items_tooltip"))
+        gen_layout.addRow(t("max_items"), self.max_items_spin)
+
         tabs.addTab(general_tab, t("tab_general"))
 
         # ── Hotkeys tab ──
@@ -238,6 +245,7 @@ class SettingsDialog(QDialog):
         self.auto_tab_check.setChecked(s.auto_tab)
         self.super_paste_check.setChecked(s.super_paste_enabled)
         self.paste_delay_spin.setValue(getattr(s, 'paste_delay_ms', 500))
+        self.max_items_spin.setValue(getattr(s, 'max_items', 200))
 
         # Load hotkeys
         hotkeys = dict(DEFAULT_HOTKEYS)
@@ -256,6 +264,7 @@ class SettingsDialog(QDialog):
         s.auto_tab = self.auto_tab_check.isChecked()
         s.super_paste_enabled = self.super_paste_check.isChecked()
         s.paste_delay_ms = self.paste_delay_spin.value()
+        s.max_items = self.max_items_spin.value()
 
         # Save hotkeys
         hotkeys = {}

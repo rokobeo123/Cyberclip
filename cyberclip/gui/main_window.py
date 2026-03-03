@@ -252,6 +252,15 @@ class MainWindow(QMainWindow):
         self.enter_btn.clicked.connect(self._toggle_auto_enter)
         tb2_layout.addWidget(self.enter_btn)
 
+        # Auto-tab toggle
+        self.tab_btn = QPushButton("\uf0e5" + "  Auto⇥")
+        self.tab_btn.setObjectName("ToolButton")
+        self.tab_btn.setCheckable(True)
+        self.tab_btn.setChecked(self.settings.auto_tab)
+        self.tab_btn.setToolTip(t("auto_tab"))
+        self.tab_btn.clicked.connect(self._toggle_auto_tab)
+        tb2_layout.addWidget(self.tab_btn)
+
         tb2_layout.addStretch()
 
         # Reset queue button
@@ -346,7 +355,7 @@ class MainWindow(QMainWindow):
         self.magazine_label.setObjectName("MagazineCounter")
         sb_layout.addWidget(self.magazine_label)
 
-        self.count_label = QLabel("0 mục")
+        self.count_label = QLabel(t("items_count", count=0))
         self.count_label.setObjectName("StatusLabel")
         sb_layout.addWidget(self.count_label)
 
@@ -479,8 +488,8 @@ class MainWindow(QMainWindow):
             if latest.text_content == item.text_content and latest.content_type == item.content_type:
                 return
 
-        # Save to DB
-        self.db.add_item(item)
+        # Save to DB (pass max_items so oldest unpinned are auto-removed)
+        self.db.add_item(item, max_items=getattr(self.settings, 'max_items', 200))
         self.magazine.add(item)
 
         # Add to UI if matching current tab
@@ -1088,6 +1097,14 @@ class MainWindow(QMainWindow):
         self.settings.auto_enter = self.enter_btn.isChecked()
         if self.settings.auto_enter:
             self.settings.auto_tab = False
+            self.tab_btn.setChecked(False)
+        self.db.save_all_settings(self.settings)
+
+    def _toggle_auto_tab(self):
+        self.settings.auto_tab = self.tab_btn.isChecked()
+        if self.settings.auto_tab:
+            self.settings.auto_enter = False
+            self.enter_btn.setChecked(False)
         self.db.save_all_settings(self.settings)
 
     def _toggle_ghost_mode(self):
@@ -1096,6 +1113,9 @@ class MainWindow(QMainWindow):
         self.monitor.set_ghost_mode(self._ghost_mode)
         self.ghost_indicator.setVisible(self._ghost_mode)
         self.ghost_btn.setChecked(self._ghost_mode)
+        # Sync tray menu checkbox (toggled via hotkey bypasses the menu)
+        if hasattr(self, '_tray_ghost_action'):
+            self._tray_ghost_action.setChecked(self._ghost_mode)
         self.hud.set_ghost_mode(self._ghost_mode)
         self.db.save_all_settings(self.settings)
 
@@ -1234,6 +1254,7 @@ class MainWindow(QMainWindow):
 
         self.strip_btn.setChecked(self.settings.strip_formatting)
         self.enter_btn.setChecked(self.settings.auto_enter)
+        self.tab_btn.setChecked(self.settings.auto_tab)
         self.ghost_btn.setChecked(self.settings.ghost_mode)
         self.ghost_indicator.setVisible(self.settings.ghost_mode)
 
@@ -1251,6 +1272,7 @@ class MainWindow(QMainWindow):
         self.mode_btn.setToolTip(t("picking_style"))
         self.strip_btn.setToolTip(t("strip_formatting"))
         self.enter_btn.setToolTip(t("auto_enter"))
+        self.tab_btn.setToolTip(t("auto_tab"))
         self._reset_btn.setToolTip(t("reset_queue"))
         self.pin_filter_btn.setToolTip(t("pin_filter"))
         self.ghost_btn.setToolTip(t("ghost_mode"))

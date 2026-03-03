@@ -25,8 +25,13 @@ class AppDetector:
 
             for rule in self._rules:
                 pattern = rule.app_pattern.lower()
-                if pattern in app_str or re.search(pattern, app_str):
-                    return rule.tab_name
+                try:
+                    if pattern in app_str or re.search(pattern, app_str):
+                        return rule.tab_name
+                except re.error:
+                    # Invalid regex pattern — fall back to plain string match only
+                    if pattern in app_str:
+                        return rule.tab_name
         except Exception:
             pass
         return None

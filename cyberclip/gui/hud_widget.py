@@ -2,6 +2,7 @@
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QLabel
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QTimer
 from PyQt6.QtGui import QPainter, QColor
+from cyberclip.utils.i18n import t
 
 
 class HUDWidget(QWidget):
@@ -40,7 +41,7 @@ class HUDWidget(QWidget):
         if total == 0:
             return  # don't show for empty queue
         if current >= total:
-            self._show_toast("✓ Hàng đợi đã hết")
+            self._show_toast(t("pasted_done"))
         else:
             text = f"▶ {current+1}/{total}"
             if preview:
@@ -51,10 +52,10 @@ class HUDWidget(QWidget):
     def set_ghost_mode(self, active: bool):
         if active:
             self.icon_label.setText("\uf21b")  # ghost
-            self._show_toast("Chế độ ẩn: BẬT", duration=2000)
+            self._show_toast(t("ghost_on"), duration=2000)
         else:
             self.icon_label.setText("\uf0ea")
-            self._show_toast("Chế độ ẩn: TẮT", duration=2000)
+            self._show_toast(t("ghost_off"), duration=2000)
 
     def notify(self, message: str, duration: int = 2500):
         """Show a generic toast notification."""
