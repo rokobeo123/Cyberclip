@@ -38,9 +38,9 @@ class Magazine(QObject):
         if self._mode == "FIFO":
             self._queue.append(item)
         else:
-            # Insert before the current pointer so new items don't skip
+            # In LIFO mode: new item becomes the next to paste (insert at current position)
             self._queue.insert(self._index, item)
-            self._index += 1  # shift pointer to keep current item
+            # Do NOT increment index — pointer stays here, now pointing at the new item
         self._emit_status()
 
     def peek(self) -> Optional[ClipboardItem]:

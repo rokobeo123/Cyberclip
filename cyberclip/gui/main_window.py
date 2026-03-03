@@ -600,6 +600,11 @@ class MainWindow(QMainWindow):
                 mime = QMimeData()
                 mime.setImageData(img)
                 clipboard.setMimeData(mime)
+            else:
+                # Bug fix: image failed to load — release lock and skip inject
+                self._paste_busy = False
+                self.monitor.resume()
+                return
         else:
             text = item.text_content
             if self.settings.strip_formatting:
@@ -637,32 +642,44 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(100, self._do_inject_paste)
 
     def _do_inject_paste(self):
-        """Inject Ctrl+V into whatever window is currently focused."""
-        from cyberclip.utils.win32_helpers import (
-            send_ctrl_v_fast, send_key, VK_RETURN, VK_TAB, KEYEVENTF_KEYUP,
-        )
-        import time
+        """Inject Ctrl+V into the target window (restoring focus if CyberClip stole it)."""
+        try:
+            from cyberclip.utils.win32_helpers import (
+                send_ctrl_v_fast, send_key, set_foreground,
+                VK_RETURN, VK_TAB, KEYEVENTF_KEYUP,
+            )
+            import time
 
-        send_ctrl_v_fast()
+            # Restore focus to the original target window when CyberClip was opened
+            if self._target_hwnd:
+                set_foreground(self._target_hwnd)
+                time.sleep(0.05)
 
-        # Auto-movement after paste
-        if self.settings.auto_enter:
-            time.sleep(0.02)
-            send_key(vk=VK_RETURN)
-            time.sleep(0.01)
-            send_key(vk=VK_RETURN, flags=KEYEVENTF_KEYUP)
-        elif self.settings.auto_tab:
-            time.sleep(0.02)
-            send_key(vk=VK_TAB)
-            time.sleep(0.01)
-            send_key(vk=VK_TAB, flags=KEYEVENTF_KEYUP)
+            send_ctrl_v_fast()
 
-        QTimer.singleShot(60, self._after_paste)
+            # Auto-movement after paste
+            if self.settings.auto_enter:
+                time.sleep(0.02)
+                send_key(vk=VK_RETURN)
+                time.sleep(0.01)
+                send_key(vk=VK_RETURN, flags=KEYEVENTF_KEYUP)
+            elif self.settings.auto_tab:
+                time.sleep(0.02)
+                send_key(vk=VK_TAB)
+                time.sleep(0.01)
+                send_key(vk=VK_TAB, flags=KEYEVENTF_KEYUP)
+
+            QTimer.singleShot(60, self._after_paste)
+        except Exception:
+            # Bug fix: always release the lock so future pastes are not blocked
+            self._paste_busy = False
+            self.monitor.resume()
 
     def _after_paste(self):
         # Don't resume monitoring immediately — give clipboard time to settle
         QTimer.singleShot(200, self.monitor.resume)
         self._paste_busy = False  # release lock
+        self._target_hwnd = None  # clear stored target — paste is done
         peek = self.magazine.peek()
         if peek:
             msg = t("pasted_next", preview=peek.preview[:30])
@@ -1031,6 +1048,14 @@ class MainWindow(QMainWindow):
     #  SHOW / HIDE ANIMATIONS
     # ═══════════════════════════════════════════════════
     def _animate_show(self):
+        # Capture the current foreground window before CyberClip takes focus,
+        # so sequential paste can restore focus to it when injecting Ctrl+V
+        try:
+            from cyberclip.utils.win32_helpers import get_foreground_hwnd
+            self._target_hwnd = get_foreground_hwnd()
+        except Exception:
+            self._target_hwnd = None
+
         self.show()
         self.setWindowOpacity(0.0)
 

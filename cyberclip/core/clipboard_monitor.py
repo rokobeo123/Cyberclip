@@ -148,6 +148,11 @@ class ClipboardMonitor(QObject):
             text = mime.text()
             if text and text.strip():
                 text = text.strip()
+                # Deduplicate rapid identical copies
+                text_hash = hashlib.md5(text.encode("utf-8", errors="replace")).hexdigest()
+                if text_hash == self._last_text_hash:
+                    return
+                self._last_text_hash = text_hash
                 item = self._classify_text(text)
                 self._detect_source(item)
                 self.item_captured.emit(item)
