@@ -71,6 +71,10 @@ _STRINGS = {
         "paste_all_start": "▶ Dán hàng loạt: {count} mục",
         "paste_all_stop": "⏹ Dừng dán hàng loạt",
         "paste_all_stopped": "⏹ Đã dừng dán hàng loạt",
+        "paste_all_progress": "⏳ Đang dán {done}/{total} — tiếp: {preview}",
+        "paste_all_done": "✓ Đã dán xong {total} mục",
+        "paste_busy": "⚠ Đang dán, vui lòng chờ…",
+        "paste_timeout": "⚠ Dán bị treo — đã tự khôi phục",
         "words": "{count} từ",
 
         # Item widget
@@ -176,6 +180,10 @@ _STRINGS = {
         "paste_all_start": "▶ Batch paste: {count} items",
         "paste_all_stop": "⏹ Stop batch paste",
         "paste_all_stopped": "⏹ Batch paste stopped",
+        "paste_all_progress": "⏳ Pasting {done}/{total} — next: {preview}",
+        "paste_all_done": "✓ Pasted all {total} items",
+        "paste_busy": "⚠ Paste in progress, please wait…",
+        "paste_timeout": "⚠ Paste got stuck — auto-recovered",
         "words": "{count} words",
 
         "pin": "Pin",

@@ -92,6 +92,8 @@ class MainWindow(QMainWindow):
         self._paste_busy = False  # lock to prevent rapid paste skipping
         self._paste_queued = 0   # queued paste count from rapid key spam
         self._paste_all_active = False  # paste-all queue mode
+        self._paste_all_total = 0       # total items in current paste-all run
+        self._paste_all_done = 0        # items pasted so far in paste-all run
 
         # Clipboard monitor (create before UI setup so _apply_settings works)
         self.monitor = ClipboardMonitor(self.image_store)
@@ -109,6 +111,11 @@ class MainWindow(QMainWindow):
         self._app_timer = QTimer(self)
         self._app_timer.timeout.connect(self._check_app_switch)
         self._app_timer.start(1000)
+
+        # Watchdog: if _paste_busy gets stuck, automatically recover after 6 s
+        self._paste_watchdog = QTimer(self)
+        self._paste_watchdog.setSingleShot(True)
+        self._paste_watchdog.timeout.connect(self._on_paste_watchdog)
 
         # Magazine signals
         self.magazine.queue_changed.connect(self._on_queue_changed)
@@ -581,48 +588,65 @@ class MainWindow(QMainWindow):
         
         If already pasting, queues the request so rapid Ctrl+Shift+V spam works.
         """
-        if self._paste_busy:
-            self._paste_queued += 1
-            return
-
-        item = self.magazine.fire()
-        if not item:
-            self._paste_queued = 0
-            return
-
-        self._paste_busy = True
-        self.monitor.pause()
-
         try:
-            clipboard = QApplication.clipboard()
-            if item.content_type == TYPE_IMAGE and item.image_path and os.path.exists(item.image_path):
-                img = QImage(item.image_path)
-                if not img.isNull():
-                    mime = QMimeData()
-                    mime.setImageData(img)
-                    clipboard.setMimeData(mime)
+            if self._paste_busy:
+                self._paste_queued += 1
+                return
+
+            item = self.magazine.fire()
+            if not item:
+                self._paste_queued = 0
+                self._paste_all_active = False
+                msg = t("queue_empty")
+                self.hud.notify(msg, 2000)
+                self.status_label.setText(msg)
+                QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
+                return
+
+            self._paste_busy = True
+            # Start watchdog — if paste_busy stays True for >6 s, auto-recover
+            self._paste_watchdog.start(6000)
+            self.monitor.pause()
+
+            try:
+                clipboard = QApplication.clipboard()
+                if item.content_type == TYPE_IMAGE and item.image_path and os.path.exists(item.image_path):
+                    img = QImage(item.image_path)
+                    if not img.isNull():
+                        mime = QMimeData()
+                        mime.setImageData(img)
+                        clipboard.setMimeData(mime)
+                    else:
+                        # Image failed to load — skip item but keep chain alive
+                        self._paste_busy = False
+                        QTimer.singleShot(0, self._after_paste)
+                        return
                 else:
-                    # Image failed to load — skip item but keep chain alive
-                    self._paste_busy = False
-                    QTimer.singleShot(0, self._after_paste)
-                    return
-            else:
-                text = item.text_content
-                if self.settings.strip_formatting:
-                    text = to_plain_text(text)
-                clipboard.setText(text)
+                    text = item.text_content
+                    if self.settings.strip_formatting:
+                        text = to_plain_text(text)
+                    clipboard.setText(text)
+
+                # Highlight current item in list (inside try so widget errors don't deadlock)
+                self._highlight_magazine_item()
+
+            except Exception:
+                # Clipboard/widget error — skip item but keep chain alive
+                self._paste_busy = False
+                QTimer.singleShot(0, self._after_paste)
+                return
+
+            # 100ms lets the clipboard settle and the event loop breathe
+            # before Ctrl+V is injected into the target app
+            QTimer.singleShot(100, self._do_inject_paste)
+
         except Exception:
-            # Clipboard set failed — skip item but keep chain alive
+            # Outer safety net — always release lock so hotkeys stay alive
             self._paste_busy = False
-            QTimer.singleShot(0, self._after_paste)
-            return
-
-        # Highlight current item in list
-        self._highlight_magazine_item()
-
-        # 100ms lets the clipboard settle and the event loop breathe
-        # before Ctrl+V is injected into the target app
-        QTimer.singleShot(100, self._do_inject_paste)
+            self._paste_all_active = False
+            self._paste_queued = 0
+            self._paste_watchdog.stop()
+            self.monitor.resume()
 
     @pyqtSlot(ClipboardItem)
     def _paste_and_inject(self, item: ClipboardItem):
@@ -684,29 +708,79 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self._after_paste)
 
     def _after_paste(self):
-        # Don't resume monitoring immediately — give clipboard time to settle
-        QTimer.singleShot(200, self.monitor.resume)
-        self._paste_busy = False  # release lock
-        self._target_hwnd = None  # clear stored target — paste is done
-        peek = self.magazine.peek()
-        if peek:
-            msg = t("pasted_next", preview=peek.preview[:30])
-        else:
-            msg = t("pasted_done")
-        self.hud.notify(msg, 2000)
-        self.status_label.setText(msg)
-        QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
+        try:
+            # Release lock and stop watchdog first
+            self._paste_busy = False
+            self._paste_watchdog.stop()
 
-        # Drain queued paste requests (from rapid Ctrl+Shift+V spam)
-        if self._paste_queued > 0:
-            self._paste_queued -= 1
-            QTimer.singleShot(20, self._sequential_paste)
-        elif self._paste_all_active and peek:
-            # 300ms > the 200ms monitor.resume() delay — avoids race where monitor
-            # is unpaused mid-paste and recaptures our own clipboard content
-            QTimer.singleShot(300, self._sequential_paste)
-        elif self._paste_all_active and not peek:
+            # Don't resume monitoring immediately — give clipboard time to settle
+            QTimer.singleShot(200, self.monitor.resume)
+
+            # Track paste-all progress
+            if self._paste_all_active:
+                self._paste_all_done += 1
+
+            peek = self.magazine.peek()
+
+            # Build status message
+            if self._paste_all_active and self._paste_all_total > 0:
+                remaining = self._paste_all_total - self._paste_all_done
+                if peek:
+                    msg = t("paste_all_progress",
+                            done=self._paste_all_done,
+                            total=self._paste_all_total,
+                            preview=peek.preview[:30])
+                else:
+                    msg = t("paste_all_done", total=self._paste_all_done)
+            elif peek:
+                msg = t("pasted_next", preview=peek.preview[:30])
+            else:
+                msg = t("pasted_done")
+
+            self.hud.notify(msg, 2000)
+            self.status_label.setText(msg)
+            QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
+
+            # Drain queued paste requests (from rapid Ctrl+Shift+V spam)
+            if self._paste_queued > 0:
+                self._paste_queued -= 1
+                self._target_hwnd = None
+                QTimer.singleShot(20, self._sequential_paste)
+            elif self._paste_all_active and peek:
+                # 300ms > the 200ms monitor.resume() delay — avoids race where monitor
+                # is unpaused mid-paste and recaptures our own clipboard content
+                QTimer.singleShot(300, self._sequential_paste)
+            else:
+                # End of chain — clear target and paste_all flag
+                self._target_hwnd = None
+                if self._paste_all_active:
+                    self._paste_all_active = False
+                    self._paste_all_total = 0
+                    self._paste_all_done = 0
+        except Exception:
+            # Safety net — always release lock
+            self._paste_busy = False
             self._paste_all_active = False
+            self._paste_queued = 0
+            self._target_hwnd = None
+            self._paste_all_total = 0
+            self._paste_all_done = 0
+            self._paste_watchdog.stop()
+
+    def _on_paste_watchdog(self):
+        """Called if _paste_busy stays True for >6 seconds — auto-recover."""
+        print("[CyberClip] Paste watchdog triggered — resetting stuck paste state")
+        self._paste_busy = False
+        self._paste_all_active = False
+        self._paste_queued = 0
+        self._target_hwnd = None
+        self._paste_all_total = 0
+        self._paste_all_done = 0
+        self.monitor.resume()
+        msg = t("paste_timeout")
+        self.hud.notify(msg, 3000)
+        self.status_label.setText(msg)
+        QTimer.singleShot(3000, lambda: self.status_label.setText(t("ready")))
 
     def _highlight_magazine_item(self):
         """Highlight the current magazine item in the item list."""
@@ -878,14 +952,25 @@ class MainWindow(QMainWindow):
             return
         # Don't start a new paste_all while a single paste is mid-flight
         if self._paste_busy:
+            self.status_label.setText(t("paste_busy"))
+            QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
             return
         if not self.magazine.peek():
             self.status_label.setText(t("queue_empty"))
             QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
             return
+
+        # Capture the current foreground window so all items paste into the same target
+        try:
+            from cyberclip.utils.win32_helpers import get_foreground_hwnd
+            self._target_hwnd = get_foreground_hwnd()
+        except Exception:
+            self._target_hwnd = None
+
         self._paste_all_active = True
-        remaining = self.magazine.remaining
-        self.hud.notify(t("paste_all_start", count=remaining), 3000)
+        self._paste_all_done = 0
+        self._paste_all_total = self.magazine.remaining
+        self.hud.notify(t("paste_all_start", count=self._paste_all_total), 3000)
         self._sequential_paste()
 
     def _skip_magazine(self):

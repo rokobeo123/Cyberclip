@@ -111,17 +111,12 @@ def send_ctrl_v():
 
 def send_ctrl_v_fast():
     """Fast Ctrl+V injection for sequential paste.
-    Releases Shift/Alt first (user may be holding Ctrl+Shift), sends
-    clean Ctrl+V via keybd_event, then the physical key state recovers
-    automatically when the user releases/re-presses their keys."""
+    Releases all modifier keys first (user may be holding Ctrl+Shift+A),
+    then sends a clean Ctrl+V via keybd_event."""
     import time
-    # Release Shift and Alt so target app sees pure Ctrl+V, not Ctrl+Shift+V
-    user32.keybd_event(VK_SHIFT, 0, KEYEVENTF_KEYUP, 0)
-    user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, 0)
-    # Also release left/right variants
-    user32.keybd_event(0xA0, 0, KEYEVENTF_KEYUP, 0)  # VK_LSHIFT
-    user32.keybd_event(0xA1, 0, KEYEVENTF_KEYUP, 0)  # VK_RSHIFT
-    time.sleep(0.005)
+    # Release all modifier variants so target app sees pure Ctrl+V
+    release_all_modifiers()
+    time.sleep(0.01)
     # Send Ctrl+V
     user32.keybd_event(VK_CONTROL, 0, 0, 0)
     time.sleep(0.005)
