@@ -384,7 +384,7 @@ class ClipItemWidget(QWidget):
         self.item.pinned = pinned
         self.pin_btn.setProperty("pinned", str(pinned).lower())
         self.setProperty("pinned", str(pinned).lower())
-        self.pin_btn.setToolTip("Bỏ ghim" if pinned else "Ghim")
+        self.pin_btn.setToolTip(t("unpin") if pinned else t("pin"))
         self.pin_btn.style().unpolish(self.pin_btn)
         self.pin_btn.style().polish(self.pin_btn)
         self.style().unpolish(self)

@@ -3,6 +3,8 @@ from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QGraphicsOpacityE
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QPoint
 from PyQt6.QtGui import QPainter, QColor
 
+from cyberclip.utils.i18n import t
+
 
 class ChoiceMenu(QWidget):
     original_selected = pyqtSignal()
@@ -21,13 +23,13 @@ class ChoiceMenu(QWidget):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(2)
 
-        self.original_btn = QPushButton("\uf0c5  Paste Original")
+        self.original_btn = QPushButton(f"\uf0c5  {t('choice_paste_original')}")
         self.original_btn.setObjectName("ChoiceItem")
         self.original_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.original_btn.clicked.connect(self._on_original)
         layout.addWidget(self.original_btn)
 
-        self.next_btn = QPushButton("\uf061  Paste Next in Queue")
+        self.next_btn = QPushButton(f"\uf061  {t('choice_paste_next')}")
         self.next_btn.setObjectName("ChoiceItem")
         self.next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.next_btn.clicked.connect(self._on_next)

@@ -57,8 +57,8 @@ pyinstaller --noconfirm --clean --onefile --windowed --name CyberClip --add-data
 |--------|--------|
 | `Ctrl+Shift+V` | Sequential paste (paste & advance) |
 | `Ctrl+Shift+A` | Paste all remaining items |
-| `Ctrl+Shift+S` | Show / Hide CyberClip |
-| `Ctrl+Shift+N` | Skip to next item |
+| `Ctrl+Shift+C` | Show / Hide CyberClip |
+| `Ctrl+Shift+S` | Skip to next item |
 | `Ctrl+Shift+G` | Toggle ghost mode |
 | `Enter` | Copy selected item |
 | `↑ / ↓` | Navigate between items |

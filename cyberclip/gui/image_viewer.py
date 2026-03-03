@@ -6,6 +6,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QPoint, QSize
 from PyQt6.QtGui import QPixmap, QPainter, QWheelEvent, QMouseEvent, QCursor
 
+from cyberclip.utils.i18n import t
+
 
 class ZoomableImageLabel(QLabel):
     """A label that supports zoom via scroll wheel and pan via drag."""
@@ -77,7 +79,7 @@ class ImageViewerDialog(QDialog):
 
     def __init__(self, image_path: str, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("🖼  Xem ảnh")
+        self.setWindowTitle(t("img_viewer_title"))
         self.setMinimumSize(600, 450)
         self.resize(800, 600)
         self.setStyleSheet(
@@ -100,22 +102,22 @@ class ImageViewerDialog(QDialog):
         toolbar.setSpacing(6)
 
         zoom_in_btn = QPushButton("🔍+")
-        zoom_in_btn.setToolTip("Phóng to")
+        zoom_in_btn.setToolTip(t("img_zoom_in"))
         zoom_in_btn.setFixedWidth(50)
         zoom_in_btn.clicked.connect(lambda: self._zoom(1.25))
         toolbar.addWidget(zoom_in_btn)
 
         zoom_out_btn = QPushButton("🔍−")
-        zoom_out_btn.setToolTip("Thu nhỏ")
+        zoom_out_btn.setToolTip(t("img_zoom_out"))
         zoom_out_btn.setFixedWidth(50)
         zoom_out_btn.clicked.connect(lambda: self._zoom(0.8))
         toolbar.addWidget(zoom_out_btn)
 
-        fit_btn = QPushButton("Vừa cửa sổ")
+        fit_btn = QPushButton(t("img_fit_window"))
         fit_btn.clicked.connect(self._fit_to_window)
         toolbar.addWidget(fit_btn)
 
-        actual_btn = QPushButton("100%")
+        actual_btn = QPushButton(t("img_actual_size"))
         actual_btn.clicked.connect(self._actual_size)
         toolbar.addWidget(actual_btn)
 
@@ -134,7 +136,7 @@ class ImageViewerDialog(QDialog):
 
         pixmap = QPixmap(image_path)
         if pixmap.isNull():
-            err = QLabel("Không thể tải ảnh")
+            err = QLabel(t("img_load_error"))
             err.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(err)
             return

@@ -117,6 +117,18 @@ _STRINGS = {
         "ocr_scanning": "Đang quét văn bản (OCR)…",
         "ocr_extracted": "OCR: {count} ký tự được trích xuất",
         "ocr_no_text": "OCR: Không tìm thấy văn bản",
+
+        # Image viewer
+        "img_viewer_title": "🖼  Xem ảnh",
+        "img_zoom_in": "Phóng to",
+        "img_zoom_out": "Thu nhỏ",
+        "img_fit_window": "Vừa cửa sổ",
+        "img_actual_size": "100%",
+        "img_load_error": "Không thể tải ảnh",
+
+        # Choice menu
+        "choice_paste_original": "Dán bản gốc",
+        "choice_paste_next": "Dán mục tiếp theo",
     },
 
     "en": {
@@ -224,6 +236,18 @@ _STRINGS = {
         "ocr_scanning": "Scanning text (OCR)…",
         "ocr_extracted": "OCR: {count} characters extracted",
         "ocr_no_text": "OCR: No text found",
+
+        # Image viewer
+        "img_viewer_title": "🖼  Image Viewer",
+        "img_zoom_in": "Zoom in",
+        "img_zoom_out": "Zoom out",
+        "img_fit_window": "Fit to window",
+        "img_actual_size": "100%",
+        "img_load_error": "Cannot load image",
+
+        # Choice menu
+        "choice_paste_original": "Paste Original",
+        "choice_paste_next": "Paste Next in Queue",
     },
 }
 

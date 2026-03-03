@@ -13,8 +13,8 @@ from PyQt6.QtGui import QImage
 from cyberclip.storage.models import ClipboardItem
 from cyberclip.utils.constants import (
     TYPE_TEXT, TYPE_IMAGE, TYPE_FILE, TYPE_URL, TYPE_COLOR,
-    TRACKING_PARAMS,
 )
+from cyberclip.core.link_cleaner import clean_url
 
 # Color detection patterns
 HEX_COLOR_RE = re.compile(r'^#(?:[0-9a-fA-F]{3}){1,2}$')
@@ -169,7 +169,7 @@ class ClipboardMonitor(QObject):
 
         # URLs
         if URL_RE.match(text):
-            cleaned = self._clean_url(text)
+            cleaned = clean_url(text)
             return ClipboardItem(
                 content_type=TYPE_URL,
                 text_content=cleaned,
@@ -190,18 +190,6 @@ class ClipboardMonitor(QObject):
             text_content=text,
             created_at=datetime.now().isoformat(),
         )
-
-    def _clean_url(self, url: str) -> str:
-        try:
-            from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
-            parsed = urlparse(url)
-            params = parse_qs(parsed.query, keep_blank_values=True)
-            cleaned = {k: v for k, v in params.items()
-                       if k.lower() not in TRACKING_PARAMS}
-            new_query = urlencode(cleaned, doseq=True)
-            return urlunparse(parsed._replace(query=new_query))
-        except Exception:
-            return url
 
     def _detect_source(self, item: ClipboardItem):
         try:
