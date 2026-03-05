@@ -689,9 +689,11 @@ class MainWindow(QMainWindow):
             self.monitor.resume()
             return
 
-        # Hide window first so target app can receive focus + Ctrl+V
-        self._animate_hide()
-        settle_ms = 400 if self._paste_item_is_image else 150
+        # Hide immediately (no animation) so Ctrl+V goes to target, not CyberClip.
+        # _animate_hide() takes 200ms; firing at 150ms means CyberClip is still
+        # the foreground window and Ctrl+V lands in our own search box.
+        self.hide()
+        settle_ms = 400 if self._paste_item_is_image else 200
         QTimer.singleShot(settle_ms, self._do_inject_paste)
 
     def _sequential_paste(self):
