@@ -211,6 +211,7 @@ class ClipboardMonitor(QObject):
 
         self._last_image_hash: str | None = None
         self._last_text_hash: str | None = None
+        self._retry_pending: bool = False   # True while a delayed-render retry is queued
 
         # Use Win32 clipboard sequence number — changes every time ANY app modifies clipboard
         try:
@@ -379,86 +380,15 @@ class ClipboardMonitor(QObject):
         )
 
         if has_image:
-            # Attempt 1: Qt native QImage (fast, handles most cases)
-            img = clipboard.image()
-            if not img.isNull() and img.width() > 0 and img.height() > 0:
-                img_hash = self._image_hash(img)
-                if img_hash and img_hash == self._last_image_hash:
-                    return
-                if img_hash:
-                    self._last_image_hash = img_hash
-                path = self.image_store.save_qimage(img)
-                item = ClipboardItem(
-                    content_type=TYPE_IMAGE,
-                    image_path=path,
-                    text_content=f"{img.width()}×{img.height()}",
-                    created_at=datetime.now().isoformat(),
-                )
-                self._detect_source(item)
-                self.item_captured.emit(item)
+            if self._try_capture_image(clipboard):
                 return
-
-            # Attempt 2: PIL ImageGrab — reads CF_DIBv5/CF_DIB directly
-            try:
-                from PIL import ImageGrab, Image as PILImage
-                import io as _io
-                pil_img = ImageGrab.grabclipboard()
-                if isinstance(pil_img, PILImage.Image):
-                    buf = _io.BytesIO()
-                    if pil_img.mode not in ("RGB", "RGBA"):
-                        pil_img = pil_img.convert("RGBA")
-                    pil_img.save(buf, "PNG")
-                    img_data = buf.getvalue()
-                    img_hash = hashlib.md5(img_data).hexdigest()
-                    if img_hash == self._last_image_hash:
-                        return
-                    self._last_image_hash = img_hash
-                    path = self.image_store.save_image(img_data)
-                    item = ClipboardItem(
-                        content_type=TYPE_IMAGE,
-                        image_path=path,
-                        text_content=f"{pil_img.width}×{pil_img.height}",
-                        created_at=datetime.now().isoformat(),
-                    )
-                    self._detect_source(item)
-                    self.item_captured.emit(item)
-                    return
-            except Exception as exc:
-                logger.debug("PIL ImageGrab fallback failed: %s", exc)
-
-            # Attempt 3: Read registered 'PNG' / 'JFIF' format bytes directly.
-            # Win+Shift+S stores the screenshot as registered 'PNG' — CF_DIB is only
-            # a synthesized alias that GetClipboardData() can silently fail to produce.
-            import io as _io
-            from PIL import Image as PILImage
-            for raw_fmt in (_CF_PNG, _CF_JFIF):
-                raw = _read_clipboard_format_bytes(raw_fmt)
-                if not raw:
-                    continue
-                try:
-                    pil_img = PILImage.open(_io.BytesIO(raw))
-                    img_hash = hashlib.md5(raw).hexdigest()
-                    if img_hash == self._last_image_hash:
-                        return
-                    self._last_image_hash = img_hash
-                    buf = _io.BytesIO()
-                    if pil_img.mode not in ("RGB", "RGBA"):
-                        pil_img = pil_img.convert("RGBA")
-                    pil_img.save(buf, "PNG")
-                    path = self.image_store.save_image(buf.getvalue())
-                    item = ClipboardItem(
-                        content_type=TYPE_IMAGE,
-                        image_path=path,
-                        text_content=f"{pil_img.width}×{pil_img.height}",
-                        created_at=datetime.now().isoformat(),
-                    )
-                    self._detect_source(item)
-                    self.item_captured.emit(item)
-                    return
-                except Exception as exc:
-                    logger.debug("registered fmt %d fallback error: %s", raw_fmt, exc)
-
-            return  # has image format but all attempts failed
+            # All attempts failed but has_image=True → Snipping Tool / delayed render.
+            # Schedule a single retry 500 ms later (gives the source app time to render).
+            if not self._retry_pending:
+                self._retry_pending = True
+                logger.info("image formats detected but all reads failed; retrying in 500 ms")
+                QTimer.singleShot(500, self._retry_image_capture)
+            return
 
         # Priority 2: Files (from Explorer copy)
         if mime.hasUrls():
@@ -487,6 +417,120 @@ class ClipboardMonitor(QObject):
                 item = self._classify_text(text)
                 self._detect_source(item)
                 self.item_captured.emit(item)
+
+    @pyqtSlot()
+    def _retry_image_capture(self):
+        """Retry image capture after a short delay (handles delayed-rendering sources)."""
+        self._retry_pending = False
+        clipboard = QApplication.clipboard()
+        if self._try_capture_image(clipboard):
+            return
+        logger.info("image retry also failed — clipboard image not readable")
+
+    def _try_capture_image(self, clipboard) -> bool:
+        """
+        Try all methods to read a clipboard image.
+        Returns True and emits item_captured if successful, False otherwise.
+
+        Order of attempts (most→least reliable for Win+Shift+S):
+        A) Win32 registered PNG/JFIF format bytes  ← primary path for Win+Shift+S
+        B) Qt clipboard.image()                    ← fast for apps that use CF_BITMAP
+        C) PIL ImageGrab.grabclipboard()            ← fallback for CF_DIB sources
+        """
+        import io as _io
+        try:
+            from PIL import Image as PILImage
+        except ImportError:
+            PILImage = None
+
+        # ── Attempt A: Win32 registered PNG/JFIF (Win+Shift+S / Snipping Tool) ──
+        # Read BEFORE touching Qt clipboard to avoid any Qt clipboard-open interference.
+        if PILImage is not None:
+            for raw_fmt, fmt_name in [(_CF_PNG, "PNG"), (_CF_JFIF, "JFIF")]:
+                if not raw_fmt or not _user32.IsClipboardFormatAvailable(raw_fmt):
+                    continue
+                raw = _read_clipboard_format_bytes(raw_fmt)
+                if not raw or len(raw) < 8:
+                    logger.debug("Attempt A(%s): read returned %s bytes", fmt_name,
+                                 len(raw) if raw else 0)
+                    continue
+                try:
+                    pil_img = PILImage.open(_io.BytesIO(raw))
+                    img_hash = hashlib.md5(raw).hexdigest()
+                    if img_hash == self._last_image_hash:
+                        return True   # duplicate
+                    self._last_image_hash = img_hash
+                    buf = _io.BytesIO()
+                    out = pil_img.convert("RGB") if pil_img.mode not in ("RGB", "RGBA") else pil_img
+                    out.save(buf, "PNG")
+                    path = self.image_store.save_image(buf.getvalue())
+                    item = ClipboardItem(
+                        content_type=TYPE_IMAGE,
+                        image_path=path,
+                        text_content=f"{pil_img.width}\u00d7{pil_img.height}",
+                        created_at=datetime.now().isoformat(),
+                    )
+                    self._detect_source(item)
+                    logger.info("image captured via Win32/%s (%dx%d)", fmt_name,
+                                pil_img.width, pil_img.height)
+                    self.item_captured.emit(item)
+                    return True
+                except Exception as exc:
+                    logger.debug("Attempt A(%s) decode error: %s", fmt_name, exc)
+
+        # ── Attempt B: Qt native QImage ──────────────────────────────────────────
+        try:
+            img = clipboard.image()
+            if not img.isNull() and img.width() > 0 and img.height() > 0:
+                img_hash = self._image_hash(img)
+                if img_hash and img_hash == self._last_image_hash:
+                    return True   # duplicate
+                if img_hash:
+                    self._last_image_hash = img_hash
+                path = self.image_store.save_qimage(img)
+                item = ClipboardItem(
+                    content_type=TYPE_IMAGE,
+                    image_path=path,
+                    text_content=f"{img.width()}\u00d7{img.height()}",
+                    created_at=datetime.now().isoformat(),
+                )
+                self._detect_source(item)
+                logger.info("image captured via Qt (%dx%d)", img.width(), img.height())
+                self.item_captured.emit(item)
+                return True
+        except Exception as exc:
+            logger.debug("Attempt B (Qt): %s", exc)
+
+        # ── Attempt C: PIL ImageGrab (reads CF_DIBv5/CF_DIB) ─────────────────────
+        if PILImage is not None:
+            try:
+                from PIL import ImageGrab
+                pil_img = ImageGrab.grabclipboard()
+                if isinstance(pil_img, PILImage.Image):
+                    buf = _io.BytesIO()
+                    out = pil_img.convert("RGB") if pil_img.mode not in ("RGB", "RGBA") else pil_img
+                    out.save(buf, "PNG")
+                    img_data = buf.getvalue()
+                    img_hash = hashlib.md5(img_data).hexdigest()
+                    if img_hash == self._last_image_hash:
+                        return True   # duplicate
+                    self._last_image_hash = img_hash
+                    path = self.image_store.save_image(img_data)
+                    item = ClipboardItem(
+                        content_type=TYPE_IMAGE,
+                        image_path=path,
+                        text_content=f"{pil_img.width}\u00d7{pil_img.height}",
+                        created_at=datetime.now().isoformat(),
+                    )
+                    self._detect_source(item)
+                    logger.info("image captured via PIL/ImageGrab (%dx%d)",
+                                pil_img.width, pil_img.height)
+                    self.item_captured.emit(item)
+                    return True
+            except Exception as exc:
+                logger.debug("Attempt C (PIL ImageGrab): %s", exc)
+
+        return False   # all attempts failed
 
     def _classify_text(self, text: str) -> ClipboardItem:
         # Color detection

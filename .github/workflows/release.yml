@@ -29,7 +29,7 @@ jobs:
 
       - name: Build exe
         run: |
-          pyinstaller --noconfirm --clean --onefile --windowed --name CyberClip --icon=assets/icon.ico --add-data "cyberclip;cyberclip" --add-data "assets;assets" main.py
+          pyinstaller --noconfirm --clean --onefile --windowed --name CyberClip --icon=assets/icon.ico --add-data "cyberclip;cyberclip" --add-data "assets;assets" --hidden-import PIL._imaging --hidden-import PIL.Image --hidden-import PIL.ImageGrab --hidden-import PIL.BmpImagePlugin --hidden-import PIL.PngImagePlugin --hidden-import PIL.JpegImagePlugin main.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
