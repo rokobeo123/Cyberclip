@@ -133,6 +133,9 @@ class MainWindow(QMainWindow):
         self._search_timer.setInterval(SEARCH_DEBOUNCE_MS)
         self._search_timer.timeout.connect(self._perform_search)
 
+        # 1.5 — Tesseract availability (None = not yet checked, False = not found, True = found)
+        self._tesseract_available = None
+
         # 5.1 — Quick paste popup (lazy-init)
         self._quick_paste_popup = None
 
@@ -182,8 +185,7 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(100, self._enable_blur)
 
-        # 1.5 — Check Tesseract availability once at startup
-        self._tesseract_available = None
+        # 1.5 — Check Tesseract availability once at startup (async, 500ms after launch)
         QTimer.singleShot(500, self._check_tesseract)
 
     # ── 1.3 Session unlock handler ────────────────────────────────────────
