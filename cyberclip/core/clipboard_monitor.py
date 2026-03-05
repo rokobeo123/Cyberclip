@@ -2,6 +2,7 @@
 #           WM_WTSSESSION_CHANGE re-attach; [1.6] _ignore_next_change flag;
 #           [5.6] per-app exclusion list; [5.3] TYPE_EMAIL, TYPE_CODE detection;
 #           [2.1] sensitive data masking — image path uses v1.3.4 proven Qt approach
+#           [fix] Win+Shift+S: delayed-render retry now not blocked by hasText()
 """Clipboard monitor using Win32 clipboard sequence number for reliable detection."""
 import os
 import re
@@ -42,6 +43,15 @@ _EXCLUDE_FORMAT = _get_exclude_clipboard_format()
 # Static sentinel value used by some builds of 1Password / Bitwarden
 _CF_EXCLUDE_STATIC = 0xC009
 
+# Win32 image format constants — used to detect images Qt's mime might miss
+CF_BITMAP = 2
+CF_DIB    = 8
+CF_DIBV5  = 17
+try:
+    _CF_PNG = _user32.RegisterClipboardFormatW("PNG")   # Win+Shift+S / Snipping Tool
+except Exception:
+    _CF_PNG = 0
+
 
 def _clipboard_has_exclude_flag() -> bool:
     """
@@ -51,6 +61,21 @@ def _clipboard_has_exclude_flag() -> bool:
     """
     try:
         for fmt in (_CF_EXCLUDE_STATIC, _EXCLUDE_FORMAT):
+            if fmt and _user32.IsClipboardFormatAvailable(fmt):
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _win32_has_image() -> bool:
+    """
+    Check Win32 directly for any image format — more reliable than mime.hasImage()
+    for delayed-render sources like Win+Shift+S which may not expose CF_DIB immediately
+    but DO register the sequence number change right away.
+    """
+    try:
+        for fmt in (CF_DIBV5, CF_DIB, CF_BITMAP, _CF_PNG):
             if fmt and _user32.IsClipboardFormatAvailable(fmt):
                 return True
     except Exception:
@@ -111,7 +136,7 @@ class ClipboardMonitor(QObject):
     that created it (the main thread). Shared mutable state is protected by
     ``_lock`` to allow safe writes from other threads (e.g. hotkey thread).
     """
-    item_captured   = pyqtSignal(ClipboardItem)
+    item_captured    = pyqtSignal(ClipboardItem)
     session_unlocked = pyqtSignal()
 
     def __init__(self, image_store, parent=None):
@@ -119,18 +144,18 @@ class ClipboardMonitor(QObject):
         self.image_store = image_store
 
         # ── Shared state — ALL writes MUST hold _lock ──────────────────────
-        self._lock                  = threading.Lock()
-        self._ghost_mode: bool      = False
-        self._blacklist: list       = []
-        self._exclusions: list      = []   # 5.6 per-app process name exclusion list
-        self._paused: bool          = False
-        self._skip_count: int       = 0
+        self._lock                     = threading.Lock()
+        self._ghost_mode: bool         = False
+        self._blacklist: list          = []
+        self._exclusions: list         = []   # 5.6 per-app process name exclusion list
+        self._paused: bool             = False
+        self._skip_count: int          = 0
         self._ignore_next_change: bool = False   # 1.6 suppress re-capture after paste
         # ───────────────────────────────────────────────────────────────────
 
         self._last_image_hash: str | None = None
         self._last_text_hash:  str | None = None
-        self._retry_seq:       int | None = None   # sequence number saved for delayed-render retry
+        self._retry_seq:       int | None = None   # seq saved for delayed-render retry
 
         try:
             self._seq_number = _user32.GetClipboardSequenceNumber()
@@ -167,10 +192,10 @@ class ClipboardMonitor(QObject):
         except Exception:
             new_seq = self._seq_number
         with self._lock:
-            self._seq_number       = new_seq
-            self._skip_count       = 0
+            self._seq_number         = new_seq
+            self._skip_count         = 0
             self._ignore_next_change = False
-            self._paused           = False
+            self._paused             = False
 
     def suppress_next(self):
         """1.6 — Call BEFORE writing to clipboard to prevent re-capture of pasted item."""
@@ -278,11 +303,12 @@ class ClipboardMonitor(QObject):
 
     def _process_clipboard(self, mime, clipboard):
         # ── Priority 1: Image ─────────────────────────────────────────────
-        # Uses the proven v1.3.4 approach: let Qt handle format detection and
-        # decoding via mime.hasImage() / clipboard.image(). Qt synthesises a
-        # QImage from whatever format the source app placed (PNG, DIB, BITMAP),
-        # including Win+Shift+S / Snipping Tool screenshots.
-        if mime.hasImage():
+        # Check BOTH Qt mime AND Win32 formats. Win+Shift+S registers CF_BITMAP/
+        # CF_PNG in Win32 before Qt's mime layer sees it, so _win32_has_image()
+        # is the authoritative check here.
+        has_image = mime.hasImage() or _win32_has_image()
+
+        if has_image:
             img = clipboard.image()
             if not img.isNull() and img.width() > 0 and img.height() > 0:
                 img_hash = self._image_hash(img)
@@ -299,7 +325,15 @@ class ClipboardMonitor(QObject):
                 )
                 self._detect_source(item)
                 self.item_captured.emit(item)
-            return
+                return
+            else:
+                # Win32 says image exists but Qt can't read it yet — delayed render.
+                # Schedule a single retry; don't fall through to text handling.
+                if self._retry_seq is None:
+                    self._retry_seq = self._seq_number
+                    logger.debug("image formats present but Qt read empty — retrying in 500ms")
+                    QTimer.singleShot(500, self._retry_image_capture)
+                return
 
         # ── Priority 2: Files ─────────────────────────────────────────────
         if mime.hasUrls():
@@ -329,22 +363,14 @@ class ClipboardMonitor(QObject):
                 item = self._classify_text(text)
                 self._detect_source(item)
                 self.item_captured.emit(item)
-                return
-
-        # ── Nothing matched — possible delayed-render screenshot ──────────
-        # Win+Shift+S bumps the sequence number before the image is ready.
-        # Schedule a single one-shot retry; the handler checks the sequence
-        # number is unchanged before re-reading so there is no double-capture.
-        if self._retry_seq is None:
-            self._retry_seq = self._seq_number
-            logger.debug("clipboard empty after seq change — scheduling 500ms retry")
-            QTimer.singleShot(500, self._retry_empty_clipboard)
 
     @pyqtSlot()
-    def _retry_empty_clipboard(self):
-        """One-shot retry for delayed-render screenshots (e.g. Win+Shift+S).
-        Only fires if no other clipboard change occurred during the 500ms wait."""
-        saved_seq      = self._retry_seq
+    def _retry_image_capture(self):
+        """
+        One-shot retry for delayed-render screenshots (Win+Shift+S).
+        Only proceeds if no other clipboard change occurred during the 500ms wait.
+        """
+        saved_seq       = self._retry_seq
         self._retry_seq = None   # consume — only one retry per event
 
         if saved_seq is None:
@@ -356,16 +382,21 @@ class ClipboardMonitor(QObject):
             return
 
         if current_seq != saved_seq:
-            # Something else wrote to clipboard — normal polling will handle it.
+            # Another clipboard change happened — normal polling will handle it.
             return
 
         clipboard = QApplication.clipboard()
         mime      = clipboard.mimeData()
-        if mime is None or not mime.hasImage():
+        if mime is None:
+            return
+
+        if not mime.hasImage() and not _win32_has_image():
+            logger.debug("retry: still no image format available — giving up")
             return
 
         img = clipboard.image()
         if img.isNull() or img.width() <= 0 or img.height() <= 0:
+            logger.debug("retry: Qt image still null after 500ms — giving up")
             return
 
         img_hash = self._image_hash(img)
