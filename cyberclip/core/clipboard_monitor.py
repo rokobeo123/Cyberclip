@@ -40,8 +40,6 @@ def _get_exclude_clipboard_format() -> int:
         return 0
 
 _EXCLUDE_FORMAT = _get_exclude_clipboard_format()
-# Static sentinel value used by some builds of 1Password / Bitwarden
-_CF_EXCLUDE_STATIC = 0xC009
 
 # Win32 image format constants — used to detect images Qt's mime might miss
 CF_BITMAP = 2
@@ -60,7 +58,7 @@ def _clipboard_has_exclude_flag() -> bool:
     IsClipboardFormatAvailable does NOT require OpenClipboard.
     """
     try:
-        for fmt in (_CF_EXCLUDE_STATIC, _EXCLUDE_FORMAT):
+        for fmt in (_EXCLUDE_FORMAT,):
             if fmt and _user32.IsClipboardFormatAvailable(fmt):
                 return True
     except Exception:
@@ -376,14 +374,9 @@ class ClipboardMonitor(QObject):
         if saved_seq is None:
             return
 
-        try:
-            current_seq = _user32.GetClipboardSequenceNumber()
-        except Exception:
-            return
-
-        if current_seq != saved_seq:
-            # Another clipboard change happened — normal polling will handle it.
-            return
+        # Note: do NOT check if current_seq == saved_seq here.
+        # Snipping Tool bumps seq a second time when it finishes rendering the image,
+        # so that check would always bail and the retry would never capture anything.
 
         clipboard = QApplication.clipboard()
         mime      = clipboard.mimeData()
