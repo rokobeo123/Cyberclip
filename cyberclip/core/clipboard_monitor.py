@@ -67,6 +67,18 @@ FILE_PATH_RE = re.compile(
 # Helpers — OpenClipboard with retry
 # ---------------------------------------------------------------------------
 _user32 = ctypes.windll.user32
+_kernel32 = ctypes.windll.kernel32
+
+# Set correct return types for Win32 functions that return HANDLE / pointer —
+# ctypes defaults to c_int (32-bit) which truncates 64-bit handles on x64 Windows.
+_user32.GetClipboardData.restype  = ctypes.c_void_p
+_user32.GetClipboardData.argtypes = [ctypes.c_uint]
+_kernel32.GlobalLock.restype      = ctypes.c_void_p
+_kernel32.GlobalLock.argtypes     = [ctypes.c_void_p]
+_kernel32.GlobalUnlock.restype    = ctypes.c_bool
+_kernel32.GlobalUnlock.argtypes   = [ctypes.c_void_p]
+_kernel32.GlobalSize.restype      = ctypes.c_size_t
+_kernel32.GlobalSize.argtypes     = [ctypes.c_void_p]
 
 def _open_clipboard_with_retry(hwnd=None, retries: int = 3, delay_ms: int = 50) -> bool:
     """Try to open the clipboard up to *retries* times, sleeping *delay_ms* between attempts."""
@@ -81,7 +93,7 @@ def _open_clipboard_with_retry(hwnd=None, retries: int = 3, delay_ms: int = 50) 
 def _read_clipboard_format_bytes(fmt: int) -> bytes | None:
     """
     Read raw bytes from a specific Win32 clipboard format (e.g. registered 'PNG').
-    Returns None if format unavailable, clipboard locked, or data empty.
+    Uses _kernel32 with corrected restype so 64-bit handles are NOT truncated.
     Win+Shift+S / Snipping Tool store the screenshot as the registered 'PNG' format;
     reading it directly bypasses the broken CF_DIB synthesis path.
     """
@@ -90,20 +102,19 @@ def _read_clipboard_format_bytes(fmt: int) -> bytes | None:
     if not _open_clipboard_with_retry():
         return None
     try:
-        kernel32 = ctypes.windll.kernel32
-        h = _user32.GetClipboardData(fmt)
+        h = _user32.GetClipboardData(fmt)   # c_void_p — correct 64-bit handle
         if not h:
             return None
-        p = kernel32.GlobalLock(h)
+        p = _kernel32.GlobalLock(h)         # c_void_p — correct 64-bit pointer
         if not p:
             return None
         try:
-            size = kernel32.GlobalSize(h)
+            size = _kernel32.GlobalSize(h)  # c_size_t — correct on 64-bit
             if size <= 0:
                 return None
             return bytes((ctypes.c_char * size).from_address(p))
         finally:
-            kernel32.GlobalUnlock(h)
+            _kernel32.GlobalUnlock(h)
     except Exception as exc:
         logger.debug("_read_clipboard_format_bytes(fmt=%d) error: %s", fmt, exc)
         return None

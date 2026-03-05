@@ -284,6 +284,16 @@ QScrollBar:horizontal {{ height: 0px; }}
     color: {TEXT_DIM};
     font-size: 10px;
 }}
+#CountBadge {{
+    color: {ACCENT};
+    font-size: 11px;
+    font-weight: 600;
+    background: rgba(10,132,255,0.12);
+    border: 1px solid rgba(10,132,255,0.30);
+    border-radius: 10px;
+    padding: 1px 8px;
+    min-width: 54px;
+}}
 #MagazineCounter {{
     color: {ACCENT};
     font-size: 11px;

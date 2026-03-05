@@ -351,10 +351,10 @@ class MainWindow(QMainWindow):
         tb2_layout.addWidget(_pac_label)
 
         self.paste_count_spin = QSpinBox()
-        self.paste_count_spin.setRange(0, 99)
-        self.paste_count_spin.setSpecialValueText("∞")
+        self.paste_count_spin.setRange(0, 999)
+        self.paste_count_spin.setSpecialValueText("All")
         self.paste_count_spin.setValue(getattr(self.settings, 'paste_all_count', 0))
-        self.paste_count_spin.setFixedWidth(52)
+        self.paste_count_spin.setFixedWidth(72)
         self.paste_count_spin.setFixedHeight(26)
         self.paste_count_spin.setToolTip(t("paste_all_count_tooltip"))
         self.paste_count_spin.setStyleSheet(
@@ -458,8 +458,11 @@ class MainWindow(QMainWindow):
         self.magazine_label.setObjectName("MagazineCounter")
         sb_layout.addWidget(self.magazine_label)
 
-        self.count_label = QLabel(t("items_count", count=0))
-        self.count_label.setObjectName("StatusLabel")
+        self.count_label = QLabel("0")
+        self.count_label.setObjectName("CountBadge")
+        self.count_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.count_label.setMinimumWidth(54)
+        self.count_label.setFixedHeight(22)
         sb_layout.addWidget(self.count_label)
 
         main_layout.addWidget(status_bar)
@@ -640,7 +643,8 @@ class MainWindow(QMainWindow):
         self.empty_widget.setVisible(len(self._item_widgets) == 0)
 
     def _update_count(self):
-        self.count_label.setText(t("items_count", count=len(self._item_widgets)))
+        n = len(self._item_widgets)
+        self.count_label.setText(f"{n} item{'s' if n != 1 else ''}")
 
     # ═══════════════════════════════════════════════════
     #  ITEM ACTIONS

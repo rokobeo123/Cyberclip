@@ -236,25 +236,26 @@ class ClipItemWidget(QWidget):
     def _setup_text_content(self, layout):
         text = self.item.text_content or self.item.preview
         lines = text.split('\n')
-        first_line = lines[0][:80]
-        if len(lines[0]) > 80:
-            first_line += "…"
-        extra = ""
-        if len(lines) > 1:
-            extra = f"  ({t('lines_more', count=len(lines)-1)})"
-        display = first_line + extra
+        # Show up to 2 lines in the collapsed preview
+        preview_lines = [l[:120] for l in lines[:2]]
+        if len(lines[0]) > 120:
+            preview_lines[0] += "…"
+        if len(lines) > 2:
+            preview_lines.append(f"  +{len(lines)-2} more line{'s' if len(lines)-2!=1 else ''}…")
+        display = '\n'.join(preview_lines)
         self.content_label = QLabel(display)
         self.content_label.setObjectName("ClipContent")
         self.content_label.setWordWrap(False)
         self.content_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.content_label.setFixedHeight(22)
-        self.content_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.content_label.setMinimumHeight(22)
+        self.content_label.setMaximumHeight(44)  # room for 2 lines
+        self.content_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         # 5.3 — Monospace font for code
         if self.item.content_type == TYPE_CODE:
             self.content_label.setStyleSheet("font-family: 'Consolas', monospace; font-size: 11px;")
         layout.addWidget(self.content_label)
 
-        self.full_content_label = QLabel(text[:2000])
+        self.full_content_label = QLabel(text[:4000])
         self.full_content_label.setObjectName("ClipContent")
         self.full_content_label.setWordWrap(True)
         self.full_content_label.setTextInteractionFlags(
