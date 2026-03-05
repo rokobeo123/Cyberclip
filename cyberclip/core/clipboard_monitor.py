@@ -130,6 +130,7 @@ class ClipboardMonitor(QObject):
 
         self._last_image_hash: str | None = None
         self._last_text_hash:  str | None = None
+        self._retry_seq:       int | None = None   # sequence number saved for delayed-render retry
 
         try:
             self._seq_number = _user32.GetClipboardSequenceNumber()
@@ -328,6 +329,61 @@ class ClipboardMonitor(QObject):
                 item = self._classify_text(text)
                 self._detect_source(item)
                 self.item_captured.emit(item)
+                return
+
+        # ── Nothing matched — possible delayed-render screenshot ──────────
+        # Win+Shift+S bumps the sequence number before the image is ready.
+        # Schedule a single one-shot retry; the handler checks the sequence
+        # number is unchanged before re-reading so there is no double-capture.
+        if self._retry_seq is None:
+            self._retry_seq = self._seq_number
+            logger.debug("clipboard empty after seq change — scheduling 500ms retry")
+            QTimer.singleShot(500, self._retry_empty_clipboard)
+
+    @pyqtSlot()
+    def _retry_empty_clipboard(self):
+        """One-shot retry for delayed-render screenshots (e.g. Win+Shift+S).
+        Only fires if no other clipboard change occurred during the 500ms wait."""
+        saved_seq      = self._retry_seq
+        self._retry_seq = None   # consume — only one retry per event
+
+        if saved_seq is None:
+            return
+
+        try:
+            current_seq = _user32.GetClipboardSequenceNumber()
+        except Exception:
+            return
+
+        if current_seq != saved_seq:
+            # Something else wrote to clipboard — normal polling will handle it.
+            return
+
+        clipboard = QApplication.clipboard()
+        mime      = clipboard.mimeData()
+        if mime is None or not mime.hasImage():
+            return
+
+        img = clipboard.image()
+        if img.isNull() or img.width() <= 0 or img.height() <= 0:
+            return
+
+        img_hash = self._image_hash(img)
+        if img_hash and img_hash == self._last_image_hash:
+            return   # duplicate
+        if img_hash:
+            self._last_image_hash = img_hash
+
+        path = self.image_store.save_qimage(img)
+        item = ClipboardItem(
+            content_type=TYPE_IMAGE,
+            image_path=path,
+            text_content=f"{img.width()}x{img.height()}",
+            created_at=datetime.now().isoformat(),
+        )
+        self._detect_source(item)
+        logger.info("delayed-render image captured on retry (%dx%d)", img.width(), img.height())
+        self.item_captured.emit(item)
 
     # ── Text classification ───────────────────────────────────────────────
     def _classify_text(self, text: str) -> ClipboardItem:
