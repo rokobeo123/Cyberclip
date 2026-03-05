@@ -33,6 +33,23 @@ CF_EXCLUDECLIPBOARDCONTENT = 0xC009   # used by password managers (1Password, Bi
 # (RegisterClipboardFormatW returns a dynamic value; the above is only used as a sentinel
 #  in some builds – we also check the dynamic registration)
 
+# Standard Win32 image formats
+CF_BITMAP  = 2
+CF_DIB     = 8
+CF_DIBV5   = 17
+
+# Pre-register custom image formats used by modern Windows apps:
+# Win+Shift+S / Snipping Tool put the screenshot as "PNG" registered format;
+# CF_DIB is only a Windows-synthesized alias and GetClipboardData(CF_DIB) can
+# silently fail when the primary data is a registered PNG.
+try:
+    _user32_tmp = ctypes.windll.user32
+    _CF_PNG  = _user32_tmp.RegisterClipboardFormatW("PNG")    # Win+Shift+S, Snipping Tool
+    _CF_JFIF = _user32_tmp.RegisterClipboardFormatW("JFIF")   # some cameras / apps
+    del _user32_tmp
+except Exception:
+    _CF_PNG = _CF_JFIF = 0
+
 # Color detection patterns
 HEX_COLOR_RE = re.compile(r'^#(?:[0-9a-fA-F]{3}){1,2}$')
 RGB_COLOR_RE = re.compile(
@@ -59,6 +76,42 @@ def _open_clipboard_with_retry(hwnd=None, retries: int = 3, delay_ms: int = 50) 
         if attempt < retries - 1:
             time.sleep(delay_ms / 1000.0)
     return False
+
+
+def _read_clipboard_format_bytes(fmt: int) -> bytes | None:
+    """
+    Read raw bytes from a specific Win32 clipboard format (e.g. registered 'PNG').
+    Returns None if format unavailable, clipboard locked, or data empty.
+    Win+Shift+S / Snipping Tool store the screenshot as the registered 'PNG' format;
+    reading it directly bypasses the broken CF_DIB synthesis path.
+    """
+    if not fmt or not _user32.IsClipboardFormatAvailable(fmt):
+        return None
+    if not _open_clipboard_with_retry():
+        return None
+    try:
+        kernel32 = ctypes.windll.kernel32
+        h = _user32.GetClipboardData(fmt)
+        if not h:
+            return None
+        p = kernel32.GlobalLock(h)
+        if not p:
+            return None
+        try:
+            size = kernel32.GlobalSize(h)
+            if size <= 0:
+                return None
+            return bytes((ctypes.c_char * size).from_address(p))
+        finally:
+            kernel32.GlobalUnlock(h)
+    except Exception as exc:
+        logger.debug("_read_clipboard_format_bytes(fmt=%d) error: %s", fmt, exc)
+        return None
+    finally:
+        try:
+            _user32.CloseClipboard()
+        except Exception:
+            pass
 
 
 def _get_exclude_clipboard_format() -> int:
@@ -308,9 +361,10 @@ class ClipboardMonitor(QObject):
         # Use Win32 IsClipboardFormatAvailable as authoritative check —
         # mime.hasImage() can miss CF_BITMAP / CF_DIB from screenshots and
         # some apps even when the data is valid.
-        CF_BITMAP, CF_DIB, CF_DIBV5 = 2, 8, 17
+        # Also check the registered 'PNG' format used by Win+Shift+S / Snipping Tool.
         has_image = mime.hasImage() or any(
-            _user32.IsClipboardFormatAvailable(f) for f in (CF_DIBV5, CF_DIB, CF_BITMAP)
+            _user32.IsClipboardFormatAvailable(f)
+            for f in (CF_DIBV5, CF_DIB, CF_BITMAP, _CF_PNG, _CF_JFIF) if f
         )
 
         if has_image:
@@ -333,16 +387,13 @@ class ClipboardMonitor(QObject):
                 self.item_captured.emit(item)
                 return
 
-            # Attempt 2: PIL ImageGrab fallback — reads Win32 CF_DIB directly
-            # This succeeds when Qt's image conversion fails (wrong colour depth,
-            # premultiplied alpha issues, partial clipboard renders, etc.)
+            # Attempt 2: PIL ImageGrab — reads CF_DIBv5/CF_DIB directly
             try:
                 from PIL import ImageGrab, Image as PILImage
                 import io as _io
                 pil_img = ImageGrab.grabclipboard()
                 if isinstance(pil_img, PILImage.Image):
                     buf = _io.BytesIO()
-                    # Convert to RGBA for consistent PNG output
                     if pil_img.mode not in ("RGB", "RGBA"):
                         pil_img = pil_img.convert("RGBA")
                     pil_img.save(buf, "PNG")
@@ -363,7 +414,40 @@ class ClipboardMonitor(QObject):
                     return
             except Exception as exc:
                 logger.debug("PIL ImageGrab fallback failed: %s", exc)
-            return  # has image format but both attempts failed — do not fall through to text
+
+            # Attempt 3: Read registered 'PNG' / 'JFIF' format bytes directly.
+            # Win+Shift+S stores the screenshot as registered 'PNG' — CF_DIB is only
+            # a synthesized alias that GetClipboardData() can silently fail to produce.
+            import io as _io
+            from PIL import Image as PILImage
+            for raw_fmt in (_CF_PNG, _CF_JFIF):
+                raw = _read_clipboard_format_bytes(raw_fmt)
+                if not raw:
+                    continue
+                try:
+                    pil_img = PILImage.open(_io.BytesIO(raw))
+                    img_hash = hashlib.md5(raw).hexdigest()
+                    if img_hash == self._last_image_hash:
+                        return
+                    self._last_image_hash = img_hash
+                    buf = _io.BytesIO()
+                    if pil_img.mode not in ("RGB", "RGBA"):
+                        pil_img = pil_img.convert("RGBA")
+                    pil_img.save(buf, "PNG")
+                    path = self.image_store.save_image(buf.getvalue())
+                    item = ClipboardItem(
+                        content_type=TYPE_IMAGE,
+                        image_path=path,
+                        text_content=f"{pil_img.width}×{pil_img.height}",
+                        created_at=datetime.now().isoformat(),
+                    )
+                    self._detect_source(item)
+                    self.item_captured.emit(item)
+                    return
+                except Exception as exc:
+                    logger.debug("registered fmt %d fallback error: %s", raw_fmt, exc)
+
+            return  # has image format but all attempts failed
 
         # Priority 2: Files (from Explorer copy)
         if mime.hasUrls():
