@@ -107,7 +107,6 @@ class Database:
             CREATE INDEX IF NOT EXISTS idx_items_created ON items(created_at);
             CREATE INDEX IF NOT EXISTS idx_items_pinned ON items(pinned);
             CREATE INDEX IF NOT EXISTS idx_items_type ON items(content_type);
-            CREATE INDEX IF NOT EXISTS idx_items_position ON items(position);
         """)
         self.conn.commit()
 
@@ -126,6 +125,11 @@ class Database:
                 logger.warning("Migration skipped (%s): %s", sql, exc)
         if migrations:
             self.conn.commit()
+        # Create position index only after column is guaranteed to exist
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_items_position ON items(position)"
+        )
+        self.conn.commit()
 
     # ── Image path references (used by startup orphan cleanup) ────────────
     def get_all_image_paths(self) -> set:
