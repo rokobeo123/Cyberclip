@@ -98,17 +98,14 @@ def _clipboard_has_exclude_flag() -> bool:
     Return True if the current clipboard data carries the ExcludeClipboardContent
     format that password managers (1Password, Bitwarden, KeePass, …) set to signal
     'do not record this in clipboard history'.
+    NOTE: IsClipboardFormatAvailable does NOT require OpenClipboard — calling
+    OpenClipboard here was causing lazy-render clipboard sources (screenshots, some
+    apps) to fail when Qt tried to read them immediately after.
     """
     try:
-        if not _open_clipboard_with_retry():
-            return False
-        try:
-            # Check both the hardcoded and dynamically registered formats
-            for fmt in (CF_EXCLUDECLIPBOARDCONTENT, _EXCLUDE_FORMAT):
-                if fmt and _user32.IsClipboardFormatAvailable(fmt):
-                    return True
-        finally:
-            _user32.CloseClipboard()
+        for fmt in (CF_EXCLUDECLIPBOARDCONTENT, _EXCLUDE_FORMAT):
+            if fmt and _user32.IsClipboardFormatAvailable(fmt):
+                return True
     except Exception:
         pass
     return False
@@ -307,23 +304,24 @@ class ClipboardMonitor(QObject):
         return False
 
     def _process_clipboard(self, mime, clipboard):
-        # Priority 1: Image (check before text since images often also have text)
-        if mime.hasImage():
+        # ── Priority 1: Image ─────────────────────────────────────────────
+        # Use Win32 IsClipboardFormatAvailable as authoritative check —
+        # mime.hasImage() can miss CF_BITMAP / CF_DIB from screenshots and
+        # some apps even when the data is valid.
+        CF_BITMAP, CF_DIB, CF_DIBV5 = 2, 8, 17
+        has_image = mime.hasImage() or any(
+            _user32.IsClipboardFormatAvailable(f) for f in (CF_DIBV5, CF_DIB, CF_BITMAP)
+        )
+
+        if has_image:
+            # Attempt 1: Qt native QImage (fast, handles most cases)
             img = clipboard.image()
             if not img.isNull() and img.width() > 0 and img.height() > 0:
-                ptr = img.bits()
-                if ptr is not None:
-                    try:
-                        ptr.setsize(img.sizeInBytes())
-                        raw = bytes(ptr)
-                        if raw:
-                            img_hash = hashlib.md5(raw).hexdigest()
-                            if img_hash == self._last_image_hash:
-                                return
-                            self._last_image_hash = img_hash
-                    except Exception as exc:
-                        logger.debug("image hash error: %s", exc)
-                        # fall through — save without hash dedup
+                img_hash = self._image_hash(img)
+                if img_hash and img_hash == self._last_image_hash:
+                    return
+                if img_hash:
+                    self._last_image_hash = img_hash
                 path = self.image_store.save_qimage(img)
                 item = ClipboardItem(
                     content_type=TYPE_IMAGE,
@@ -334,6 +332,38 @@ class ClipboardMonitor(QObject):
                 self._detect_source(item)
                 self.item_captured.emit(item)
                 return
+
+            # Attempt 2: PIL ImageGrab fallback — reads Win32 CF_DIB directly
+            # This succeeds when Qt's image conversion fails (wrong colour depth,
+            # premultiplied alpha issues, partial clipboard renders, etc.)
+            try:
+                from PIL import ImageGrab, Image as PILImage
+                import io as _io
+                pil_img = ImageGrab.grabclipboard()
+                if isinstance(pil_img, PILImage.Image):
+                    buf = _io.BytesIO()
+                    # Convert to RGBA for consistent PNG output
+                    if pil_img.mode not in ("RGB", "RGBA"):
+                        pil_img = pil_img.convert("RGBA")
+                    pil_img.save(buf, "PNG")
+                    img_data = buf.getvalue()
+                    img_hash = hashlib.md5(img_data).hexdigest()
+                    if img_hash == self._last_image_hash:
+                        return
+                    self._last_image_hash = img_hash
+                    path = self.image_store.save_image(img_data)
+                    item = ClipboardItem(
+                        content_type=TYPE_IMAGE,
+                        image_path=path,
+                        text_content=f"{pil_img.width}×{pil_img.height}",
+                        created_at=datetime.now().isoformat(),
+                    )
+                    self._detect_source(item)
+                    self.item_captured.emit(item)
+                    return
+            except Exception as exc:
+                logger.debug("PIL ImageGrab fallback failed: %s", exc)
+            return  # has image format but both attempts failed — do not fall through to text
 
         # Priority 2: Files (from Explorer copy)
         if mime.hasUrls():
@@ -424,3 +454,20 @@ class ClipboardMonitor(QObject):
             item.source_app = exe or title or ""
         except Exception:
             pass
+
+    def _image_hash(self, img) -> str | None:
+        """Compute MD5 of QImage pixel data.  Uses bytesPerLine()*height() which is
+        reliable in PyQt6 — sizeInBytes() can return 0 for some image formats."""
+        try:
+            size = img.bytesPerLine() * img.height()
+            if size <= 0:
+                return None
+            ptr = img.bits()
+            if ptr is None:
+                return None
+            ptr.setsize(size)
+            raw = bytes(ptr)
+            return hashlib.md5(raw).hexdigest() if raw else None
+        except Exception as exc:
+            logger.debug("_image_hash error: %s", exc)
+            return None
