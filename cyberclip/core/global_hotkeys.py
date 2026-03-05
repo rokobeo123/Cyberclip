@@ -1,12 +1,24 @@
+# Modified: [1.4] RegisterHotKey failure notification with user-visible tray message;
+#           hotkey conflict detection; thread-safety note on registration
 """Lightweight global hotkey manager using Win32 RegisterHotKey.
 
 Registers system-wide hotkeys that work even when the app window is hidden.
 User can customize all hotkeys from Settings.
+
+THREAD SAFETY:  RegisterHotKey / UnregisterHotKey MUST be called from the
+same thread that processes the Win32 message loop.  In CyberClip the
+GlobalHotkeyManager is constructed on the main thread and the QApplication
+native event filter runs on the main thread — so all hotkey operations here
+are inherently on the correct thread.  Do NOT call register() / unregister_all()
+from a background thread.
 """
+import logging
 import ctypes
 import ctypes.wintypes as wt
 from PyQt6.QtCore import QObject, pyqtSignal, QAbstractNativeEventFilter, QByteArray
 from PyQt6.QtWidgets import QApplication
+
+logger = logging.getLogger(__name__)
 
 WM_HOTKEY = 0x0312
 MOD_CONTROL = 0x0002
@@ -93,48 +105,82 @@ class NativeHotkeyFilter(QAbstractNativeEventFilter):
 
 
 class GlobalHotkeyManager(QObject):
-    """Manages global hotkeys. Emits action name when a hotkey is pressed."""
-    triggered = pyqtSignal(str)  # action name
+    """Manages global hotkeys. Emits action name when a hotkey is pressed.
+
+    1.4: registration_failed signal is emitted with (action, shortcut) when
+    RegisterHotKey fails so the main window can notify the user via a tray
+    notification instead of silently swallowing the error.
+    """
+    triggered = pyqtSignal(str)                     # action name
+    registration_failed = pyqtSignal(str, str)      # (action, shortcut) — 1.4
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._registered = {}   # id -> action_name
-        self._action_ids = {}   # action_name -> id
-        self._next_id = 0xB000  # Start at a high ID to avoid conflicts
+        self._registered: dict[int, str] = {}    # id -> action_name
+        self._action_ids: dict[str, int] = {}    # action_name -> id
+        self._next_id = 0xB000
         self._filter = NativeHotkeyFilter(self._on_hotkey)
         app = QApplication.instance()
         if app:
             app.installNativeEventFilter(self._filter)
 
     def register(self, action: str, shortcut: str) -> bool:
-        """Register a global hotkey. Returns True on success."""
+        """
+        Register a global hotkey.
+
+        Returns True on success.
+        1.4: On failure, logs an error AND emits registration_failed(action, shortcut)
+        so the caller can surface a non-blocking notification to the user.
+        """
         mods, vk = parse_shortcut(shortcut)
         if vk is None:
+            logger.warning("register: could not parse shortcut '%s' for action '%s'", shortcut, action)
             return False
 
-        # Unregister existing binding for this action
+        # Unregister existing binding for this action first
         if action in self._action_ids:
             self._unregister_one(action)
 
         hid = self._next_id
         self._next_id += 1
 
-        ok = user32.RegisterHotKey(None, hid, mods | MOD_NOREPEAT, vk)
+        try:
+            ok = bool(user32.RegisterHotKey(None, hid, mods | MOD_NOREPEAT, vk))
+        except Exception as exc:
+            logger.error("RegisterHotKey raised for action '%s' (%s): %s", action, shortcut, exc)
+            ok = False
+
         if ok:
             self._registered[hid] = action
             self._action_ids[action] = hid
+            logger.debug("Registered hotkey '%s' -> '%s' (id=%d)", action, shortcut, hid)
             return True
+
+        # 1.4 — Registration failed (conflict with another app or OS restriction)
+        err = ctypes.get_last_error()
+        logger.warning(
+            "RegisterHotKey FAILED for action '%s' shortcut '%s' "
+            "(Win32 error %d — likely conflict with another application)",
+            action, shortcut, err
+        )
+        self.registration_failed.emit(action, shortcut)
         return False
 
     def _unregister_one(self, action: str):
         hid = self._action_ids.pop(action, None)
         if hid is not None:
-            user32.UnregisterHotKey(None, hid)
+            try:
+                user32.UnregisterHotKey(None, hid)
+            except Exception as exc:
+                logger.warning("UnregisterHotKey failed for action '%s': %s", action, exc)
             self._registered.pop(hid, None)
 
     def unregister_all(self):
         for hid in list(self._registered.keys()):
-            user32.UnregisterHotKey(None, hid)
+            try:
+                user32.UnregisterHotKey(None, hid)
+            except Exception:
+                pass
         self._registered.clear()
         self._action_ids.clear()
 

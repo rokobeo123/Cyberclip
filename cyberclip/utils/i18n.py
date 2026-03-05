@@ -1,3 +1,8 @@
+# Modified: Added new UI strings for Phase 1 (hotkey conflict, OCR no-tesseract),
+#           Phase 2 (sensitive data, ghost mode), Phase 3 (search debounce feedback),
+#           Phase 4 (tray items, paste-all confirm), Phase 5 (transforms, snippets,
+#           quick paste popup, export/import), Phase 6 (error messages).
+#           All new keys added to both "vi" and "en" sections.
 """Internationalization strings for CyberClip."""
 
 _STRINGS = {
@@ -38,6 +43,9 @@ _STRINGS = {
         "shortcut_search": "Tìm kiếm",
         "shortcut_escape": "Ẩn / Dừng dán hàng loạt",
         "reset_hotkeys": "Đặt lại phím tắt mặc định",
+
+        # 1.4 Hotkey conflict
+        "hotkey_conflict": "⚠ Phím tắt '{shortcut}' ({action}) bị xung đột — bị ứng dụng khác chiếm",
 
         # Buttons
         "paste_delay": "Độ trễ giữa các lần dán:",
@@ -104,6 +112,8 @@ _STRINGS = {
         "ctx_ocr": "🔍 Quét OCR",
         "ctx_open_explorer": "📂 Mở trong Explorer",
         "ctx_delete": "🗑️ Xóa",
+        "ctx_transform": "🔄 Chuyển đổi",        # 5.2
+        "ctx_save_snippet": "📌 Lưu làm Snippet",   # 5.4
 
         # Tray
         "tray_show": "Hiện CyberClip",
@@ -115,10 +125,11 @@ _STRINGS = {
         "empty_title": "Chưa có gì",
         "empty_subtitle": "Copy nội dung để bắt đầu",
 
-        # OCR
+        # OCR (1.5)
         "ocr_scanning": "Đang quét văn bản (OCR)…",
         "ocr_extracted": "OCR: {count} ký tự được trích xuất",
         "ocr_no_text": "OCR: Không tìm thấy văn bản",
+        "ocr_no_tesseract": "OCR không khả dụng — Tesseract chưa được cài",
 
         # Image viewer
         "img_viewer_title": "🖼  Xem ảnh",
@@ -131,6 +142,58 @@ _STRINGS = {
         # Choice menu
         "choice_paste_original": "Dán bản gốc",
         "choice_paste_next": "Dán mục tiếp theo",
+
+        # 2.1 Sensitive data
+        "sensitive_masked": "[Dữ liệu nhạy cảm — đã ẩn]",
+        "sensitive_category": "Nhạy cảm",
+
+        # 4.1 Paste-all confirm
+        "paste_all_confirm_title": "Xác nhận dán hàng loạt",
+        "paste_all_confirm_msg": "Sắp dán {count} mục. Tiếp tục?",
+
+        # 4.3 Tray recent items
+        "tray_recent": "Gần đây",
+
+        # 5.1 Quick paste popup
+        "quick_paste_title": "Dán nhanh",
+        "quick_paste_hint": "Nhấn số hoặc click để dán • Esc để đóng",
+
+        # 5.2 Text transforms
+        "transform_uppercase": "CHỮ HOA",
+        "transform_lowercase": "chữ thường",
+        "transform_titlecase": "Viết Hoa Đầu Từ",
+        "transform_sentencecase": "Viết hoa đầu câu",
+        "transform_trim": "Xóa khoảng trắng thừa",
+        "transform_remove_spaces": "Xóa khoảng trắng kép",
+        "transform_join_lines": "Nối thành 1 dòng",
+        "transform_url_encode": "URL Encode",
+        "transform_url_decode": "URL Decode",
+        "transform_base64_encode": "Base64 Encode",
+        "transform_base64_decode": "Base64 Decode",
+        "transform_json_format": "JSON đẹp",
+        "transform_json_minify": "JSON thu gọn",
+        "transform_dedup_lines": "Xóa dòng trùng",
+
+        # 5.4 Snippets
+        "snippets_tab": "Snippets",
+        "snippet_name": "Tên snippet",
+        "snippet_trigger": "Trigger keyword",
+        "snippet_save": "Lưu Snippet",
+        "snippet_saved": "✓ Đã lưu snippet",
+
+        # 5.5 Export / Import
+        "export_history": "Xuất lịch sử…",
+        "import_history": "Nhập lịch sử…",
+        "export_done": "✓ Đã xuất {count} mục",
+        "import_done": "✓ Đã nhập {count} mục (bỏ qua {skipped} trùng)",
+
+        # 5.6 Exclusion list
+        "exclusion_title": "Danh sách loại trừ",
+        "exclusion_hint": "Thêm tên tiến trình (vd: KeePass.exe)",
+
+        # 6.3 Error messages
+        "db_error": "⚠ Lỗi cơ sở dữ liệu — xem log để biết chi tiết",
+        "win32_error": "⚠ Lỗi Win32 ({code})",
     },
 
     "en": {
@@ -166,6 +229,9 @@ _STRINGS = {
         "shortcut_search": "Search",
         "shortcut_escape": "Hide / Stop batch paste",
         "reset_hotkeys": "Reset hotkeys to defaults",
+
+        # 1.4 Hotkey conflict
+        "hotkey_conflict": "⚠ Hotkey '{shortcut}' ({action}) could not be registered — conflict with another app",
 
         "paste_delay": "Paste delay:",
         "paste_delay_tooltip": "Wait time between each item in paste-all. Increase if items are missed (e.g. Gemini, ChatGPT). Default: 500ms",
@@ -227,6 +293,8 @@ _STRINGS = {
         "ctx_ocr": "🔍 OCR scan",
         "ctx_open_explorer": "📂 Open in Explorer",
         "ctx_delete": "🗑️ Delete",
+        "ctx_transform": "🔄 Transform",              # 5.2
+        "ctx_save_snippet": "📌 Save as Snippet",       # 5.4
 
         "tray_show": "Show CyberClip",
         "tray_ghost": "Ghost mode",
@@ -236,10 +304,11 @@ _STRINGS = {
         "empty_title": "Nothing here",
         "empty_subtitle": "Copy something to get started",
 
-        # OCR
+        # OCR (1.5)
         "ocr_scanning": "Scanning text (OCR)…",
         "ocr_extracted": "OCR: {count} characters extracted",
         "ocr_no_text": "OCR: No text found",
+        "ocr_no_tesseract": "OCR unavailable — Tesseract not installed",
 
         # Image viewer
         "img_viewer_title": "🖼  Image Viewer",
@@ -252,6 +321,58 @@ _STRINGS = {
         # Choice menu
         "choice_paste_original": "Paste Original",
         "choice_paste_next": "Paste Next in Queue",
+
+        # 2.1 Sensitive data
+        "sensitive_masked": "[Sensitive data — masked]",
+        "sensitive_category": "Sensitive",
+
+        # 4.1 Paste-all confirm
+        "paste_all_confirm_title": "Confirm Batch Paste",
+        "paste_all_confirm_msg": "About to paste {count} items. Continue?",
+
+        # 4.3 Tray recent items
+        "tray_recent": "Recent",
+
+        # 5.1 Quick paste popup
+        "quick_paste_title": "Quick Paste",
+        "quick_paste_hint": "Press number or click to paste • Esc to close",
+
+        # 5.2 Text transforms
+        "transform_uppercase": "UPPERCASE",
+        "transform_lowercase": "lowercase",
+        "transform_titlecase": "Title Case",
+        "transform_sentencecase": "Sentence case",
+        "transform_trim": "Trim whitespace",
+        "transform_remove_spaces": "Remove extra spaces",
+        "transform_join_lines": "Join to single line",
+        "transform_url_encode": "URL Encode",
+        "transform_url_decode": "URL Decode",
+        "transform_base64_encode": "Base64 Encode",
+        "transform_base64_decode": "Base64 Decode",
+        "transform_json_format": "JSON format (pretty)",
+        "transform_json_minify": "JSON minify",
+        "transform_dedup_lines": "Remove duplicate lines",
+
+        # 5.4 Snippets
+        "snippets_tab": "Snippets",
+        "snippet_name": "Snippet name",
+        "snippet_trigger": "Trigger keyword",
+        "snippet_save": "Save Snippet",
+        "snippet_saved": "✓ Snippet saved",
+
+        # 5.5 Export / Import
+        "export_history": "Export history…",
+        "import_history": "Import history…",
+        "export_done": "✓ Exported {count} items",
+        "import_done": "✓ Imported {count} items (skipped {skipped} duplicates)",
+
+        # 5.6 Exclusion list
+        "exclusion_title": "Exclusion List",
+        "exclusion_hint": "Add process names (e.g. KeePass.exe)",
+
+        # 6.3 Error messages
+        "db_error": "⚠ Database error — see log for details",
+        "win32_error": "⚠ Win32 error ({code})",
     },
 }
 

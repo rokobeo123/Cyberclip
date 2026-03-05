@@ -1,3 +1,9 @@
+# Modified: [1.4] hotkey registration_failed → tray notification;
+#           [1.5] OCR via OcrWorker QThread (never on main thread), disable button if no Tesseract;
+#           [1.6] monitor.suppress_next() before every clipboard write to prevent re-capture;
+#           [1.3] WM_WTSSESSION_CHANGE → monitor.on_session_unlocked() re-sync;
+#           [3.3] 300ms search debounce; [4.2] position persistence after drag-drop;
+#           [6.2] constructor dependency injection (db, image_store)
 """Main CyberClip window - modern clipboard manager UI."""
 import os
 import subprocess
@@ -8,18 +14,20 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QScrollArea, QApplication,
     QSizePolicy, QSystemTrayIcon, QMenu, QGraphicsOpacityEffect,
-    QGraphicsDropShadowEffect, QSpinBox,
+    QGraphicsDropShadowEffect, QSpinBox, QMessageBox, QFileDialog,
 )
 from PyQt6.QtCore import (
     Qt, pyqtSignal, pyqtSlot, QTimer, QPropertyAnimation,
     QEasingCurve, QPoint, QSize, QEvent, QRect,
-    QParallelAnimationGroup, QMimeData,
+    QParallelAnimationGroup, QMimeData, QAbstractNativeEventFilter, QByteArray,
 )
 from PyQt6.QtGui import (
     QIcon, QPixmap, QColor, QPainter, QPen, QBrush, QImage,
     QLinearGradient, QFont, QAction, QCursor, QGuiApplication,
     QShortcut, QKeySequence,
 )
+import ctypes
+import ctypes.wintypes as wt
 
 from cyberclip.storage.database import Database
 from cyberclip.storage.image_store import ImageStore
@@ -38,11 +46,35 @@ from cyberclip.gui.styles import CYBERPUNK_QSS
 from cyberclip.utils.constants import (
     APP_NAME, NEON_CYAN, NEON_PURPLE, DARK_BG, DARK_SURFACE,
     FONT_FAMILY, FONT_FAMILY_FALLBACK, TYPE_TEXT, TYPE_IMAGE,
-    TYPE_URL, TYPE_FILE, TYPE_COLOR, DEFAULT_BLACKLIST, DEFAULT_HOTKEYS,
-    TEXT_SECONDARY, ACCENT, ANIM_FAST, ANIM_NORMAL,
+    TYPE_URL, TYPE_FILE, TYPE_COLOR, TYPE_EMAIL, TYPE_CODE,
+    DEFAULT_BLACKLIST, DEFAULT_HOTKEYS,
+    TEXT_SECONDARY, ACCENT, ANIM_FAST, ANIM_NORMAL, SEARCH_DEBOUNCE_MS,
+    QUICK_PASTE_MAX_ITEMS,
 )
 from cyberclip.core.global_hotkeys import GlobalHotkeyManager
 from cyberclip.utils.i18n import set_language, t
+
+# WM_WTSSESSION_CHANGE constants (1.3)
+WM_WTSSESSION_CHANGE = 0x02B1
+WTS_SESSION_UNLOCK = 0x8
+
+
+class SessionChangeFilter(QAbstractNativeEventFilter):
+    """Intercepts WM_WTSSESSION_CHANGE to detect Windows lock/unlock (1.3)."""
+    def __init__(self, callback):
+        super().__init__()
+        self._cb = callback
+
+    def nativeEventFilter(self, event_type, message):
+        if event_type in (b"windows_generic_MSG", QByteArray(b"windows_generic_MSG")):
+            try:
+                msg = ctypes.cast(int(message), ctypes.POINTER(wt.MSG)).contents
+                if msg.message == WM_WTSSESSION_CHANGE:
+                    self._cb(int(msg.wParam))
+                    return False, 0  # don't consume, just observe
+            except Exception:
+                pass
+        return False, 0
 
 
 class MainWindow(QMainWindow):
@@ -57,12 +89,11 @@ class MainWindow(QMainWindow):
     ICON_MINIMIZE = "\uf2d1"
     ICON_CLOSE = "\uf00d"
     ICON_PIN_MENU = "\uf08d"
-    ICON_COLLAPSE_ALL = "\uf066"  # compress
-    ICON_EXPAND_ALL = "\uf065"    # expand
+    ICON_COLLAPSE_ALL = "\uf066"
+    ICON_EXPAND_ALL = "\uf065"
 
-    def __init__(self):
+    def __init__(self, db: Database = None, image_store: ImageStore = None):
         super().__init__()
-        # Remove native title bar, add frameless + translucent
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
@@ -73,9 +104,9 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(380, 500)
         self.setMouseTracking(True)
 
-        # Initialize subsystems
-        self.db = Database()
-        self.image_store = ImageStore()
+        # 6.2 — Accept injected dependencies (ServiceLocator pattern in app.py)
+        self.db = db if db is not None else Database()
+        self.image_store = image_store if image_store is not None else ImageStore()
         self.settings = self.db.load_settings()
         self.magazine = Magazine()
         self.safety_net = SafetyNet()
@@ -88,15 +119,24 @@ class MainWindow(QMainWindow):
         self._ghost_mode = self.settings.ghost_mode
         self._search_query = ""
         self._pin_filter = False
-        self._target_hwnd = None  # foreground window to paste into
-        self._paste_busy = False  # lock to prevent rapid paste skipping
-        self._paste_queued = 0   # queued paste count from rapid key spam
-        self._paste_all_active = False  # paste-all queue mode
-        self._paste_all_total = 0       # total items in current paste-all run
-        self._paste_all_done = 0        # items pasted so far in paste-all run
-        self._paste_item_is_image = False  # True when current paste item is an image
+        self._target_hwnd = None
+        self._paste_busy = False
+        self._paste_queued = 0
+        self._paste_all_active = False
+        self._paste_all_total = 0
+        self._paste_all_done = 0
+        self._paste_item_is_image = False
 
-        # Clipboard monitor (create before UI setup so _apply_settings works)
+        # 3.3 — search debounce timer
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(SEARCH_DEBOUNCE_MS)
+        self._search_timer.timeout.connect(self._perform_search)
+
+        # 5.1 — Quick paste popup (lazy-init)
+        self._quick_paste_popup = None
+
+        # Clipboard monitor (pass dependencies via constructor — 6.2)
         self.monitor = ClipboardMonitor(self.image_store)
         self.monitor.item_captured.connect(self._on_item_captured)
 
@@ -105,7 +145,7 @@ class MainWindow(QMainWindow):
         self._apply_settings()
         self._load_items()
 
-        # HUD (toast notifications — starts hidden)
+        # HUD
         self.hud = HUDWidget()
 
         # App detector timer
@@ -113,12 +153,11 @@ class MainWindow(QMainWindow):
         self._app_timer.timeout.connect(self._check_app_switch)
         self._app_timer.start(1000)
 
-        # Watchdog: if _paste_busy gets stuck, automatically recover after 6 s
+        # Paste watchdog
         self._paste_watchdog = QTimer(self)
         self._paste_watchdog.setSingleShot(True)
         self._paste_watchdog.timeout.connect(self._on_paste_watchdog)
 
-        # Magazine signals
         self.magazine.queue_changed.connect(self._on_queue_changed)
 
         # System tray
@@ -126,6 +165,12 @@ class MainWindow(QMainWindow):
 
         # Global hotkeys
         self._setup_global_hotkeys()
+
+        # 1.3 — Session change filter (Windows lock/unlock)
+        self._session_filter = SessionChangeFilter(self._on_session_change)
+        app = QApplication.instance()
+        if app:
+            app.installNativeEventFilter(self._session_filter)
 
         # Window position
         if self.settings.window_x >= 0:
@@ -135,9 +180,36 @@ class MainWindow(QMainWindow):
             self.resize(1000, 700)
             self._center_on_screen()
 
-        # Enable DWM blur on Win11
         QTimer.singleShot(100, self._enable_blur)
 
+        # 1.5 — Check Tesseract availability once at startup
+        self._tesseract_available = None
+        QTimer.singleShot(500, self._check_tesseract)
+
+    # ── 1.3 Session unlock handler ────────────────────────────────────────
+    def _on_session_change(self, event_type: int):
+        if event_type == WTS_SESSION_UNLOCK:
+            # Re-sync clipboard monitor after Windows lock/unlock
+            QTimer.singleShot(500, self.monitor.on_session_unlocked)
+
+    # ── 1.5 Tesseract availability ────────────────────────────────────────
+    def _check_tesseract(self):
+        from cyberclip.core.ocr_scanner import is_tesseract_available
+        self._tesseract_available = is_tesseract_available()
+        if not self._tesseract_available:
+            # Disable OCR buttons on all existing widgets
+            for w in self._item_widgets:
+                self._update_ocr_button_state(w)
+
+    def _update_ocr_button_state(self, widget: ClipItemWidget):
+        """Disable OCR action buttons if Tesseract is not available."""
+        if self._tesseract_available is False:
+            for btn in widget.findChildren(QPushButton):
+                if btn.toolTip() == t("ocr_scan"):
+                    btn.setEnabled(False)
+                    btn.setToolTip(t("ocr_no_tesseract"))
+
+    # ──────────────────────────────────────────────────────────────────────
     def _setup_ui(self):
         central = QWidget()
         central.setObjectName("CentralWidget")
@@ -159,19 +231,16 @@ class MainWindow(QMainWindow):
         tb_layout.setContentsMargins(14, 0, 8, 0)
         tb_layout.setSpacing(8)
 
-        # App icon/title
         title_label = QLabel(APP_NAME)
         title_label.setObjectName("TitleLabel")
         tb_layout.addWidget(title_label)
         tb_layout.addStretch()
 
-        # Ghost mode indicator
         self.ghost_indicator = QLabel("\uf21b  GHOST")
         self.ghost_indicator.setObjectName("GhostIndicator")
         self.ghost_indicator.setVisible(self._ghost_mode)
         tb_layout.addWidget(self.ghost_indicator)
 
-        # Title buttons
         self._settings_btn = QPushButton(self.ICON_SETTINGS)
         self._settings_btn.setObjectName("TitleButton")
         self._settings_btn.setFixedSize(32, 28)
@@ -206,6 +275,7 @@ class MainWindow(QMainWindow):
         self.search_bar = QLineEdit()
         self.search_bar.setObjectName("SearchBar")
         self.search_bar.setPlaceholderText(t("search_placeholder"))
+        # 3.3 — debounce: start timer on every keystroke
         self.search_bar.textChanged.connect(self._on_search)
         self.search_bar.setFixedHeight(34)
 
@@ -226,7 +296,6 @@ class MainWindow(QMainWindow):
         tb2_layout.setContentsMargins(8, 0, 8, 0)
         tb2_layout.setSpacing(4)
 
-        # FIFO/LIFO toggle
         self.mode_btn = QPushButton(self.ICON_FIFO + "  FIFO")
         self.mode_btn.setObjectName("ToolButton")
         self.mode_btn.setCheckable(True)
@@ -234,7 +303,6 @@ class MainWindow(QMainWindow):
         self.mode_btn.clicked.connect(self._toggle_mode)
         tb2_layout.addWidget(self.mode_btn)
 
-        # Strip formatting toggle
         self.strip_btn = QPushButton(self.ICON_STRIP + "  Clean")
         self.strip_btn.setObjectName("ToolButton")
         self.strip_btn.setCheckable(True)
@@ -243,7 +311,6 @@ class MainWindow(QMainWindow):
         self.strip_btn.clicked.connect(self._toggle_strip)
         tb2_layout.addWidget(self.strip_btn)
 
-        # Auto-enter toggle
         self.enter_btn = QPushButton(self.ICON_ENTER + "  Auto↵")
         self.enter_btn.setObjectName("ToolButton")
         self.enter_btn.setCheckable(True)
@@ -252,7 +319,6 @@ class MainWindow(QMainWindow):
         self.enter_btn.clicked.connect(self._toggle_auto_enter)
         tb2_layout.addWidget(self.enter_btn)
 
-        # Auto-tab toggle
         self.tab_btn = QPushButton("\uf0e5" + "  Auto⇥")
         self.tab_btn.setObjectName("ToolButton")
         self.tab_btn.setCheckable(True)
@@ -263,7 +329,6 @@ class MainWindow(QMainWindow):
 
         tb2_layout.addStretch()
 
-        # Paste-all count spinbox (items per Ctrl+Shift+A; 0 = all)
         _pac_label = QLabel("×")
         _pac_label.setStyleSheet(f"color: {TEXT_SECONDARY}; font-size: 11px; background: transparent;")
         _pac_label.setToolTip(t("paste_all_count_tooltip"))
@@ -284,14 +349,12 @@ class MainWindow(QMainWindow):
         self.paste_count_spin.valueChanged.connect(self._on_paste_count_changed)
         tb2_layout.addWidget(self.paste_count_spin)
 
-        # Reset queue button
-        self._reset_btn = QPushButton("\uf0e2")  # rotate-left icon
+        self._reset_btn = QPushButton("\uf0e2")
         self._reset_btn.setObjectName("ToolButton")
         self._reset_btn.setToolTip(t("reset_queue"))
         self._reset_btn.clicked.connect(self._reset_magazine)
         tb2_layout.addWidget(self._reset_btn)
 
-        # Pinned filter
         self.pin_filter_btn = QPushButton(self.ICON_PIN_MENU)
         self.pin_filter_btn.setObjectName("ToolButton")
         self.pin_filter_btn.setCheckable(True)
@@ -299,7 +362,6 @@ class MainWindow(QMainWindow):
         self.pin_filter_btn.clicked.connect(self._toggle_pin_filter)
         tb2_layout.addWidget(self.pin_filter_btn)
 
-        # Collapse all button
         self._all_collapsed = False
         self.collapse_all_btn = QPushButton(self.ICON_EXPAND_ALL)
         self.collapse_all_btn.setObjectName("ToolButton")
@@ -307,7 +369,6 @@ class MainWindow(QMainWindow):
         self.collapse_all_btn.clicked.connect(self._toggle_collapse_all)
         tb2_layout.addWidget(self.collapse_all_btn)
 
-        # Ghost mode toggle
         self.ghost_btn = QPushButton(self.ICON_GHOST)
         self.ghost_btn.setObjectName("ToolButton")
         self.ghost_btn.setCheckable(True)
@@ -316,7 +377,6 @@ class MainWindow(QMainWindow):
         self.ghost_btn.clicked.connect(self._toggle_ghost_mode)
         tb2_layout.addWidget(self.ghost_btn)
 
-        # Clear button
         self._clear_btn = QPushButton(self.ICON_CLEAR)
         self._clear_btn.setObjectName("ToolButton")
         self._clear_btn.setProperty("danger", True)
@@ -326,7 +386,7 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(toolbar)
 
-        # ── Clip List (Scroll Area) ──
+        # ── Clip List ──
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -369,7 +429,6 @@ class MainWindow(QMainWindow):
         self.status_label = QLabel(t("ready"))
         self.status_label.setObjectName("StatusLabel")
         sb_layout.addWidget(self.status_label)
-
         sb_layout.addStretch()
 
         self.magazine_label = QLabel("")
@@ -382,31 +441,22 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(status_bar)
 
-    # ═══════════════════════════════════════════════════
-    #  PAINTING - Clean rounded dark window
-    # ═══════════════════════════════════════════════════
+    # ── Paint ────────────────────────────────────────────────────────────
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
         rect = self.rect().adjusted(4, 4, -4, -4)
-
-        # Clean dark background with subtle border
         painter.setBrush(QColor(28, 28, 30, 248))
         pen = QPen(QColor(255, 255, 255, 18))
         pen.setWidth(1)
         painter.setPen(pen)
         painter.drawRoundedRect(rect, 14, 14)
-
         painter.end()
 
-    # ═══════════════════════════════════════════════════
-    #  WINDOW EDGE RESIZE (mouse-based for frameless window)
-    # ═══════════════════════════════════════════════════
+    # ── Edge resize ───────────────────────────────────────────────────────
     _RESIZE_BORDER = 8
 
     def _edge_zone(self, pos):
-        """Return resize edge/corner or None for a given local pos."""
         r = self.rect()
         b = self._RESIZE_BORDER
         left = pos.x() < b
@@ -424,14 +474,10 @@ class MainWindow(QMainWindow):
         return None
 
     _CURSOR_MAP = {
-        "l": Qt.CursorShape.SizeHorCursor,
-        "r": Qt.CursorShape.SizeHorCursor,
-        "t": Qt.CursorShape.SizeVerCursor,
-        "b": Qt.CursorShape.SizeVerCursor,
-        "tl": Qt.CursorShape.SizeFDiagCursor,
-        "br": Qt.CursorShape.SizeFDiagCursor,
-        "tr": Qt.CursorShape.SizeBDiagCursor,
-        "bl": Qt.CursorShape.SizeBDiagCursor,
+        "l": Qt.CursorShape.SizeHorCursor, "r": Qt.CursorShape.SizeHorCursor,
+        "t": Qt.CursorShape.SizeVerCursor, "b": Qt.CursorShape.SizeVerCursor,
+        "tl": Qt.CursorShape.SizeFDiagCursor, "br": Qt.CursorShape.SizeFDiagCursor,
+        "tr": Qt.CursorShape.SizeBDiagCursor, "bl": Qt.CursorShape.SizeBDiagCursor,
     }
 
     def mousePressEvent(self, event):
@@ -452,22 +498,14 @@ class MainWindow(QMainWindow):
             geo = QRect(self._resize_start_geo)
             edge = self._resize_edge
             min_w, min_h = self.minimumWidth(), self.minimumHeight()
-
-            if "r" in edge:
-                geo.setRight(geo.right() + delta.x())
-            if "b" in edge:
-                geo.setBottom(geo.bottom() + delta.y())
-            if "l" in edge:
-                geo.setLeft(min(geo.left() + delta.x(), geo.right() - min_w))
-            if "t" in edge:
-                geo.setTop(min(geo.top() + delta.y(), geo.bottom() - min_h))
-
+            if "r" in edge: geo.setRight(geo.right() + delta.x())
+            if "b" in edge: geo.setBottom(geo.bottom() + delta.y())
+            if "l" in edge: geo.setLeft(min(geo.left() + delta.x(), geo.right() - min_w))
+            if "t" in edge: geo.setTop(min(geo.top() + delta.y(), geo.bottom() - min_h))
             if geo.width() >= min_w and geo.height() >= min_h:
                 self.setGeometry(geo)
             event.accept()
             return
-
-        # Update cursor when hovering over edges
         zone = self._edge_zone(event.pos())
         if zone and zone in self._CURSOR_MAP:
             self.setCursor(self._CURSOR_MAP[zone])
@@ -480,9 +518,7 @@ class MainWindow(QMainWindow):
         self.unsetCursor()
         super().mouseReleaseEvent(event)
 
-    # ═══════════════════════════════════════════════════
-    #  TITLE BAR DRAG
-    # ═══════════════════════════════════════════════════
+    # ── Title bar drag ────────────────────────────────────────────────────
     def _title_mouse_press(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
@@ -499,38 +535,31 @@ class MainWindow(QMainWindow):
     # ═══════════════════════════════════════════════════
     @pyqtSlot(ClipboardItem)
     def _on_item_captured(self, item: ClipboardItem):
-        # Assign tab based on app detection
         tab = self.app_detector.detect_tab()
         item.tab = tab or self._current_tab
 
-        # Skip exact duplicate if the most recent item has the same content
+        # Skip exact duplicate of latest visible item
         if item.content_type != TYPE_IMAGE and self._item_widgets:
             latest = self._item_widgets[0].item
             if latest.text_content == item.text_content and latest.content_type == item.content_type:
                 return
 
-        # Save to DB (pass max_items so oldest unpinned are auto-removed)
         self.db.add_item(item, max_items=getattr(self.settings, 'max_items', 200))
         self.magazine.add(item)
 
-        # Add to UI if matching current tab
         if item.tab == self._current_tab or not self._current_tab:
             self._add_item_widget(item, animate=True)
             self._update_empty_state()
             self._update_count()
 
-        # Update tabs
         tabs = self.db.get_tabs()
         self.tab_bar.set_tabs(tabs)
 
-        # Toast notification
         self.hud.notify(f"📋 {item.preview[:30]}", 2000)
-
         self.status_label.setText(t("copied_ctrlv"))
         QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
     def _load_items(self):
-        # Clear existing
         for w in self._item_widgets:
             w.deleteLater()
         self._item_widgets.clear()
@@ -540,15 +569,13 @@ class MainWindow(QMainWindow):
         else:
             items = self.db.get_items(self._current_tab)
 
-        # Apply pin filter
         if self._pin_filter:
             items = [i for i in items if i.pinned]
 
-        # Load into magazine
         fifo_items = self.db.get_items_fifo(self._current_tab)
         self.magazine.load(fifo_items)
 
-        for i, item in enumerate(items):
+        for item in items:
             self._add_item_widget(item, animate=False)
 
         self._update_empty_state()
@@ -557,6 +584,11 @@ class MainWindow(QMainWindow):
 
         tabs = self.db.get_tabs()
         self.tab_bar.set_tabs(tabs)
+
+        # 1.5 — update OCR button states after load
+        if self._tesseract_available is False:
+            for w in self._item_widgets:
+                self._update_ocr_button_state(w)
 
     def _add_item_widget(self, item: ClipboardItem, animate: bool = False):
         widget = ClipItemWidget(item)
@@ -568,21 +600,24 @@ class MainWindow(QMainWindow):
         widget.open_file_requested.connect(self._open_file)
         widget.start_from_here.connect(self._start_from_here)
         widget.view_image_requested.connect(self._view_image)
+        widget.transform_requested.connect(self._on_transform_requested)    # 5.2
+        widget.save_snippet_requested.connect(self._on_save_snippet)         # 5.4
 
-        # Insert at top (newest first)
         self.list_layout.insertWidget(0, widget)
         self._item_widgets.insert(0, widget)
+
+        # 1.5 — immediately disable OCR button if no Tesseract
+        if self._tesseract_available is False:
+            self._update_ocr_button_state(widget)
 
         if animate:
             widget.animate_in(delay_ms=0)
 
     def _update_empty_state(self):
-        has_items = len(self._item_widgets) > 0
-        self.empty_widget.setVisible(not has_items)
+        self.empty_widget.setVisible(len(self._item_widgets) == 0)
 
     def _update_count(self):
-        count = len(self._item_widgets)
-        self.count_label.setText(t("items_count", count=count))
+        self.count_label.setText(t("items_count", count=len(self._item_widgets)))
 
     # ═══════════════════════════════════════════════════
     #  ITEM ACTIONS
@@ -590,6 +625,8 @@ class MainWindow(QMainWindow):
     @pyqtSlot(ClipboardItem)
     def _paste_item(self, item: ClipboardItem):
         """Copy item to clipboard so user can paste it anywhere."""
+        # 1.6 — suppress monitor BEFORE writing to clipboard
+        self.monitor.suppress_next()
         self.monitor.pause()
 
         clipboard = QApplication.clipboard()
@@ -606,19 +643,12 @@ class MainWindow(QMainWindow):
                 text = to_plain_text(text)
             clipboard.setText(text)
 
-        # Delay resume to avoid re-capturing our own clipboard change
         QTimer.singleShot(500, self.monitor.resume)
 
-        # Status feedback
         self.status_label.setText(t("copied_ctrlv"))
         QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
     def _sequential_paste(self):
-        """The CORE feature: paste current magazine item into the target app,
-        then auto-advance to the next item.  Triggered by global hotkey.
-        
-        If already pasting, queues the request so rapid Ctrl+Shift+V spam works.
-        """
         try:
             if self._paste_busy:
                 self._paste_queued += 1
@@ -635,8 +665,10 @@ class MainWindow(QMainWindow):
                 return
 
             self._paste_busy = True
-            # Start watchdog — if paste_busy stays True for >6 s, auto-recover
             self._paste_watchdog.start(6000)
+
+            # 1.6 — suppress BEFORE writing to clipboard
+            self.monitor.suppress_next()
             self.monitor.pause()
 
             try:
@@ -647,13 +679,9 @@ class MainWindow(QMainWindow):
                         mime = QMimeData()
                         mime.setImageData(img)
                         clipboard.setMimeData(mime)
-                        # Force Qt to flush the image data into Win32 clipboard now.
-                        # Without this, Qt may defer the write (lazy rendering) and the
-                        # image won't be in the clipboard when Ctrl+V fires.
                         QApplication.processEvents()
                         self._paste_item_is_image = True
                     else:
-                        # Image failed to load — skip item but keep chain alive
                         self._paste_busy = False
                         self._paste_item_is_image = False
                         QTimer.singleShot(0, self._after_paste)
@@ -665,55 +693,25 @@ class MainWindow(QMainWindow):
                     clipboard.setText(text)
                     self._paste_item_is_image = False
 
-                # Highlight current item in list (inside try so widget errors don't deadlock)
                 self._highlight_magazine_item()
 
             except Exception:
-                # Clipboard/widget error — skip item but keep chain alive
                 self._paste_busy = False
                 self._paste_item_is_image = False
                 QTimer.singleShot(0, self._after_paste)
                 return
 
-            # Images need longer to settle in clipboard (Win32 lazy rendering).
-            # Text is ready in 100ms; images need ~300ms to be reliably available.
             settle_ms = 300 if self._paste_item_is_image else 100
             QTimer.singleShot(settle_ms, self._do_inject_paste)
 
         except Exception:
-            # Outer safety net — always release lock so hotkeys stay alive
             self._paste_busy = False
             self._paste_all_active = False
             self._paste_queued = 0
             self._paste_watchdog.stop()
             self.monitor.resume()
 
-    @pyqtSlot(ClipboardItem)
-    def _paste_and_inject(self, item: ClipboardItem):
-        """Copy item to clipboard then simulate Ctrl+V into the target window."""
-        self.monitor.pause()
-
-        clipboard = QApplication.clipboard()
-
-        if item.content_type == TYPE_IMAGE and item.image_path and os.path.exists(item.image_path):
-            img = QImage(item.image_path)
-            if not img.isNull():
-                mime = QMimeData()
-                mime.setImageData(img)
-                clipboard.setMimeData(mime)
-        else:
-            text = item.text_content
-            if self.settings.strip_formatting:
-                text = to_plain_text(text)
-            clipboard.setText(text)
-
-        # Hide window so paste goes to the window behind us
-        if self.isVisible():
-            self.hide()
-        QTimer.singleShot(100, self._do_inject_paste)
-
     def _do_inject_paste(self):
-        """Inject Ctrl+V into the target window (restoring focus if CyberClip stole it)."""
         try:
             from cyberclip.utils.win32_helpers import (
                 send_ctrl_v_fast, send_key, set_foreground,
@@ -721,16 +719,12 @@ class MainWindow(QMainWindow):
             )
             import time
 
-            # Restore focus to the original target window when CyberClip was opened
             if self._target_hwnd:
                 set_foreground(self._target_hwnd)
-                # Give browser/web apps more time to restore focus to the active input
-                # element after the window receives WM_SETFOCUS (50ms is not enough)
                 time.sleep(0.15)
 
             send_ctrl_v_fast()
 
-            # Auto-movement after paste
             if self.settings.auto_enter:
                 time.sleep(0.02)
                 send_key(vk=VK_RETURN)
@@ -744,27 +738,20 @@ class MainWindow(QMainWindow):
 
             QTimer.singleShot(60, self._after_paste)
         except Exception:
-            # Always continue the chain — _after_paste handles lock release and
-            # paste_all continuation. Without this, paste_all stops silently on error.
             self._paste_busy = False
             QTimer.singleShot(0, self._after_paste)
 
     def _after_paste(self):
         try:
-            # Release lock and stop watchdog first
             self._paste_busy = False
             self._paste_watchdog.stop()
-
-            # Don't resume monitoring immediately — give clipboard time to settle
             QTimer.singleShot(200, self.monitor.resume)
 
-            # Track paste-all progress
             if self._paste_all_active:
                 self._paste_all_done += 1
 
             peek = self.magazine.peek()
 
-            # Build status message
             if self._paste_all_active and self._paste_all_total > 0:
                 remaining = self._paste_all_total - self._paste_all_done
                 if peek and remaining > 0:
@@ -783,26 +770,15 @@ class MainWindow(QMainWindow):
             self.status_label.setText(msg)
             QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
-            # Drain queued paste requests (from rapid Ctrl+Shift+V spam)
             if self._paste_queued > 0:
                 self._paste_queued -= 1
                 self._target_hwnd = None
                 QTimer.singleShot(20, self._sequential_paste)
             elif self._paste_all_active and peek and self._paste_all_done < self._paste_all_total:
-                # Images need more time between pastes: target app is slower to absorb
-                # a large image than a text string. Use 2x paste_delay for images.
-                # Both values must exceed the 200ms monitor.resume() delay to avoid recapture.
-                base_delay = max(getattr(self.settings, 'paste_delay_ms', 500), 300)
-                inter_delay = base_delay * 2 if self._paste_item_is_image else base_delay
-                QTimer.singleShot(inter_delay, self._sequential_paste)
-                # Images need more time between pastes: target app is slower to absorb
-                # a large image than a text string. Use 2x paste_delay for images.
-                # Both values must exceed the 200ms monitor.resume() delay to avoid recapture.
                 base_delay = max(getattr(self.settings, 'paste_delay_ms', 500), 300)
                 inter_delay = base_delay * 2 if self._paste_item_is_image else base_delay
                 QTimer.singleShot(inter_delay, self._sequential_paste)
             else:
-                # End of chain — clear target and paste_all flag
                 self._target_hwnd = None
                 self._paste_item_is_image = False
                 if self._paste_all_active:
@@ -810,7 +786,6 @@ class MainWindow(QMainWindow):
                     self._paste_all_total = 0
                     self._paste_all_done = 0
         except Exception:
-            # Safety net — always release lock
             self._paste_busy = False
             self._paste_all_active = False
             self._paste_queued = 0
@@ -821,8 +796,6 @@ class MainWindow(QMainWindow):
             self._paste_watchdog.stop()
 
     def _on_paste_watchdog(self):
-        """Called if _paste_busy stays True for >6 seconds — auto-recover."""
-        print("[CyberClip] Paste watchdog triggered — resetting stuck paste state")
         self._paste_busy = False
         self._paste_all_active = False
         self._paste_queued = 0
@@ -837,7 +810,6 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(3000, lambda: self.status_label.setText(t("ready")))
 
     def _highlight_magazine_item(self):
-        """Highlight the current magazine item in the item list."""
         current = self.magazine.peek()
         for w in self._item_widgets:
             is_current = (current is not None) and (w.item.id == current.id)
@@ -845,7 +817,6 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(ClipboardItem)
     def _delete_item(self, item: ClipboardItem):
-        # Find widget
         for w in self._item_widgets:
             if w.item.id == item.id:
                 self._item_widgets.remove(w)
@@ -853,9 +824,8 @@ class MainWindow(QMainWindow):
                 break
 
     def _finalize_delete(self, widget, item):
+        # 1.7 — db.delete_item now handles image file deletion atomically
         self.db.delete_item(item.id)
-        if item.image_path:
-            self.image_store.delete_image(item.image_path)
         widget.deleteLater()
         self._update_empty_state()
         self._update_count()
@@ -868,20 +838,43 @@ class MainWindow(QMainWindow):
                 w.update_pin_state(new_state)
                 break
 
+    # ── 1.5 OCR via QThread worker ────────────────────────────────────────
     @pyqtSlot(ClipboardItem)
     def _ocr_item(self, item: ClipboardItem):
-        self.status_label.setText(t("ocr_scanning"))
-        QTimer.singleShot(100, lambda: self._do_ocr(item))
+        from cyberclip.core.ocr_scanner import is_tesseract_available, OcrWorker, TESSERACT_INSTALL_INSTRUCTIONS
 
-    def _do_ocr(self, item: ClipboardItem):
-        from cyberclip.core.ocr_scanner import scan_image
-        text = scan_image(item.image_path)
-        if text:
-            clipboard = QApplication.clipboard()
-            clipboard.setText(text)
-            self.status_label.setText(t("ocr_extracted", count=len(text)))
-        else:
-            self.status_label.setText(t("ocr_no_text"))
+        if not is_tesseract_available():
+            self.status_label.setText(t("ocr_no_tesseract"))
+            self.tray_icon.showMessage(
+                APP_NAME,
+                TESSERACT_INSTALL_INSTRUCTIONS[:200],
+                QSystemTrayIcon.MessageIcon.Information,
+                5000,
+            )
+            QTimer.singleShot(4000, lambda: self.status_label.setText(t("ready")))
+            return
+
+        self.status_label.setText(t("ocr_scanning"))
+
+        worker = OcrWorker(item.image_path, self)
+        worker.ocr_done.connect(self._on_ocr_done)
+        worker.ocr_error.connect(self._on_ocr_error)
+        # Keep reference so GC doesn't collect it
+        self._ocr_worker = worker
+        worker.start()
+
+    @pyqtSlot(str)
+    def _on_ocr_done(self, text: str):
+        # 1.6 — suppress monitor before writing OCR result to clipboard
+        self.monitor.suppress_next()
+        clipboard = QApplication.clipboard()
+        clipboard.setText(text)
+        self.status_label.setText(t("ocr_extracted", count=len(text)))
+        QTimer.singleShot(3000, lambda: self.status_label.setText(t("ready")))
+
+    @pyqtSlot(str)
+    def _on_ocr_error(self, msg: str):
+        self.status_label.setText(t("ocr_no_text"))
         QTimer.singleShot(3000, lambda: self.status_label.setText(t("ready")))
 
     @pyqtSlot(str)
@@ -894,7 +887,6 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(ClipboardItem)
     def _view_image(self, item: ClipboardItem):
-        """Open the image viewer dialog for an image clip."""
         from cyberclip.gui.image_viewer import ImageViewerDialog
         if item.image_path and os.path.exists(item.image_path):
             viewer = ImageViewerDialog(item.image_path, self)
@@ -902,10 +894,8 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(ClipboardItem)
     def _on_item_clicked(self, item: ClipboardItem):
-        """Single click sets this item as the magazine start position."""
         for w in self._item_widgets:
             w.set_selected(w.item.id == item.id)
-        # Set magazine to start from this item
         if self.magazine.set_start(item.id):
             self._highlight_magazine_item()
             peek = self.magazine.peek()
@@ -915,10 +905,9 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(ClipboardItem)
     def _start_from_here(self, item: ClipboardItem):
-        """Context menu start from here — same as click."""
         self._on_item_clicked(item)
 
-    # ── Drag & Drop reordering ──
+    # ── Drag & Drop reordering ─────────────────────────────────────────────
     def _list_drag_enter(self, event):
         if event.mimeData().hasFormat("application/x-cyberclip-item-id"):
             event.acceptProposedAction()
@@ -926,7 +915,6 @@ class MainWindow(QMainWindow):
     def _list_drag_move(self, event):
         if event.mimeData().hasFormat("application/x-cyberclip-item-id"):
             event.acceptProposedAction()
-            # Highlight drop target
             target_idx = self._drop_index_at(event.position().toPoint())
             for i, w in enumerate(self._item_widgets):
                 w.setProperty("drop_target", "true" if i == target_idx else "false")
@@ -936,7 +924,6 @@ class MainWindow(QMainWindow):
     def _list_drop(self, event):
         if not event.mimeData().hasFormat("application/x-cyberclip-item-id"):
             return
-        # Clear drop highlights
         for w in self._item_widgets:
             w.setProperty("drop_target", "false")
             w.style().unpolish(w)
@@ -946,7 +933,6 @@ class MainWindow(QMainWindow):
             "application/x-cyberclip-item-id").data().decode())
         target_idx = self._drop_index_at(event.position().toPoint())
 
-        # Find the dragged widget
         dragged_widget = None
         dragged_idx = -1
         for i, w in enumerate(self._item_widgets):
@@ -957,31 +943,27 @@ class MainWindow(QMainWindow):
         if dragged_widget is None or dragged_idx == target_idx:
             return
 
-        # Move widget in internal list
         self._item_widgets.pop(dragged_idx)
         if target_idx > dragged_idx:
             target_idx -= 1
         target_idx = max(0, min(target_idx, len(self._item_widgets)))
         self._item_widgets.insert(target_idx, dragged_widget)
 
-        # Rebuild the layout to match new order
-        # Remove all widgets from layout (without deleting)
         while self.list_layout.count():
             self.list_layout.takeAt(0)
         for w in self._item_widgets:
             self.list_layout.addWidget(w)
-        # Re-add empty state widget at the end (always present but hidden)
         self.list_layout.addWidget(self.empty_widget)
 
-        # Sync magazine order
         new_ids = [w.item.id for w in self._item_widgets]
         self.magazine.reorder(new_ids)
+        # 4.2 — persist new order to SQLite
+        self.db.update_positions(new_ids)
         self._highlight_magazine_item()
 
         event.acceptProposedAction()
 
     def _drop_index_at(self, pos):
-        """Determine the list index at the given position for drop insertion."""
         for i, w in enumerate(self._item_widgets):
             widget_rect = w.geometry()
             mid_y = widget_rect.top() + widget_rect.height() // 2
@@ -993,18 +975,14 @@ class MainWindow(QMainWindow):
     #  MAGAZINE / QUEUE
     # ═══════════════════════════════════════════════════
     def _fire_magazine(self):
-        """Fire magazine — paste current item and auto-advance."""
         self._sequential_paste()
 
     def _paste_all(self):
-        """Paste ALL remaining items in the queue sequentially."""
-        # Toggle: if already running, cancel it
         if self._paste_all_active:
             self._paste_all_active = False
             self.status_label.setText(t("paste_all_stop"))
             QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
             return
-        # Don't start a new paste_all while a single paste is mid-flight
         if self._paste_busy:
             self.status_label.setText(t("paste_busy"))
             QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
@@ -1014,7 +992,22 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
             return
 
-        # Capture the current foreground window so all items paste into the same target
+        limit = getattr(self.settings, 'paste_all_count', 0)
+        total = self.magazine.remaining
+        count = min(total, limit) if limit > 0 else total
+
+        # 4.1 — Confirm dialog when pasting more than 10 items
+        if count > 10:
+            reply = QMessageBox.question(
+                self,
+                t("paste_all_confirm_title"),
+                t("paste_all_confirm_msg", count=count),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+
         try:
             from cyberclip.utils.win32_helpers import get_foreground_hwnd
             self._target_hwnd = get_foreground_hwnd()
@@ -1023,19 +1016,15 @@ class MainWindow(QMainWindow):
 
         self._paste_all_active = True
         self._paste_all_done = 0
-        limit = getattr(self.settings, 'paste_all_count', 0)
-        total = self.magazine.remaining
-        self._paste_all_total = min(total, limit) if limit > 0 else total
+        self._paste_all_total = count
         self.hud.notify(t("paste_all_start", count=self._paste_all_total), 3000)
         self._sequential_paste()
 
     def _on_paste_count_changed(self, value: int):
-        """Save paste-all count when spinbox changes."""
         self.settings.paste_all_count = value
         self.db.save_setting("paste_all_count", value)
 
     def _skip_magazine(self):
-        """Skip current magazine item without pasting."""
         item = self.magazine.fire()
         if item:
             self._highlight_magazine_item()
@@ -1052,11 +1041,19 @@ class MainWindow(QMainWindow):
     @pyqtSlot(int, int)
     def _on_queue_changed(self, index, total):
         if total > 0 and index < total:
-            self.magazine_label.setText(f"▶ {index+1}/{total}")
+            pos_label = f"[{index+1}/{total}]"
+            self.magazine_label.setText(f"▶ {pos_label}")
         elif total > 0 and index >= total:
             self.magazine_label.setText(f"✓ {total}/{total}")
+            pos_label = f"[{total}/{total}]"
         else:
             self.magazine_label.setText("")
+            pos_label = ""
+        # 4.1 — Update tray tooltip with current position
+        if pos_label:
+            self.tray_icon.setToolTip(f"{APP_NAME} {pos_label}")
+        else:
+            self.tray_icon.setToolTip(APP_NAME)
         peek = self.magazine.peek()
         self.hud.update_info(index, total, peek.preview if peek else "")
         self._highlight_magazine_item()
@@ -1065,11 +1062,11 @@ class MainWindow(QMainWindow):
     #  GLOBAL HOTKEYS
     # ═══════════════════════════════════════════════════
     def _setup_global_hotkeys(self):
-        """Register all global hotkeys from settings."""
         self._hotkey_mgr = GlobalHotkeyManager(self)
         self._hotkey_mgr.triggered.connect(self._on_global_hotkey)
+        # 1.4 — connect registration failure to non-blocking tray notification
+        self._hotkey_mgr.registration_failed.connect(self._on_hotkey_registration_failed)
 
-        # Start with defaults, overlay user overrides for matching keys only
         hotkeys = dict(DEFAULT_HOTKEYS)
         if self.settings.hotkeys:
             for k, v in self.settings.hotkeys.items():
@@ -1078,9 +1075,23 @@ class MainWindow(QMainWindow):
         self.settings.hotkeys = hotkeys
 
         for action, shortcut in hotkeys.items():
-            ok = self._hotkey_mgr.register(action, shortcut)
-            if not ok:
-                print(f"[CyberClip] Failed to register hotkey: {action} = {shortcut}")
+            self._hotkey_mgr.register(action, shortcut)
+
+    # 1.4 — non-blocking notification when hotkey registration fails
+    @pyqtSlot(str, str)
+    def _on_hotkey_registration_failed(self, action: str, shortcut: str):
+        msg = t("hotkey_conflict", action=action, shortcut=shortcut)
+        try:
+            self.tray_icon.showMessage(
+                APP_NAME,
+                msg,
+                QSystemTrayIcon.MessageIcon.Warning,
+                5000,
+            )
+        except Exception:
+            pass
+        self.status_label.setText(msg)
+        QTimer.singleShot(4000, lambda: self.status_label.setText(t("ready")))
 
     def _on_global_hotkey(self, action: str):
         if action == "sequential_paste":
@@ -1096,9 +1107,10 @@ class MainWindow(QMainWindow):
             self._skip_magazine()
         elif action == "ghost_mode":
             self._toggle_ghost_mode()
+        elif action == "quick_paste":        # 5.1
+            self._show_quick_paste_popup()
 
     def _reload_hotkeys(self):
-        """Re-register hotkeys after user changes them in settings."""
         self._hotkey_mgr.unregister_all()
         hotkeys = dict(DEFAULT_HOTKEYS)
         if self.settings.hotkeys:
@@ -1147,12 +1159,12 @@ class MainWindow(QMainWindow):
         self.monitor.set_ghost_mode(self._ghost_mode)
         self.ghost_indicator.setVisible(self._ghost_mode)
         self.ghost_btn.setChecked(self._ghost_mode)
-        # Sync tray menu checkbox (toggled via hotkey bypasses the menu)
         if hasattr(self, '_tray_ghost_action'):
             self._tray_ghost_action.setChecked(self._ghost_mode)
         self.hud.set_ghost_mode(self._ghost_mode)
         self.db.save_all_settings(self.settings)
-
+        # 2.2 — Change tray icon to indicate ghost mode is active
+        self._update_tray_icon()
         self.status_label.setText(t("ghost_on") if self._ghost_mode else t("ghost_off"))
         QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
@@ -1163,7 +1175,6 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
     def _reset_magazine(self):
-        """Reset magazine: re-sort according to current FIFO/LIFO mode and start from beginning."""
         self.magazine.reset()
         self._highlight_magazine_item()
         mode_name = "FIFO" if self.settings.picking_style == "FIFO" else "LIFO"
@@ -1171,7 +1182,6 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
     def _toggle_pin_filter(self):
-        """Toggle showing only pinned items."""
         self._pin_filter = self.pin_filter_btn.isChecked()
         self._load_items()
         if self._pin_filter:
@@ -1181,7 +1191,6 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
 
     def _toggle_collapse_all(self):
-        """Toggle expand/collapse all clip items."""
         self._all_collapsed = not self._all_collapsed
         for w in self._item_widgets:
             if self._all_collapsed and not w._collapsed:
@@ -1196,10 +1205,15 @@ class MainWindow(QMainWindow):
             self.collapse_all_btn.setToolTip(t("expand_all"))
 
     # ═══════════════════════════════════════════════════
-    #  SEARCH
+    #  SEARCH (3.3 — debounced)
     # ═══════════════════════════════════════════════════
     def _on_search(self, text: str):
+        """Restart debounce timer on every keystroke."""
         self._search_query = text.strip()
+        self._search_timer.start()  # restarts if already running
+
+    def _perform_search(self):
+        """Actually execute the search after debounce delay."""
         self._load_items()
 
     # ═══════════════════════════════════════════════════
@@ -1219,8 +1233,6 @@ class MainWindow(QMainWindow):
     #  SHOW / HIDE ANIMATIONS
     # ═══════════════════════════════════════════════════
     def _animate_show(self):
-        # Capture the current foreground window before CyberClip takes focus,
-        # so sequential paste can restore focus to it when injecting Ctrl+V
         try:
             from cyberclip.utils.win32_helpers import get_foreground_hwnd
             self._target_hwnd = get_foreground_hwnd()
@@ -1231,15 +1243,12 @@ class MainWindow(QMainWindow):
         self.setWindowOpacity(0.0)
 
         group = QParallelAnimationGroup(self)
-
-        # Fade in
         opacity = QPropertyAnimation(self, b"windowOpacity")
         opacity.setDuration(300)
         opacity.setStartValue(0.0)
         opacity.setEndValue(1.0)
         opacity.setEasingCurve(QEasingCurve.Type.OutCubic)
         group.addAnimation(opacity)
-
         group.start()
         self._show_anim = group
         self.activateWindow()
@@ -1271,7 +1280,6 @@ class MainWindow(QMainWindow):
         self._reload_hotkeys()
 
     def _apply_settings(self):
-        # Set language
         lang = getattr(self.settings, 'language', 'vi')
         set_language(lang)
 
@@ -1292,20 +1300,15 @@ class MainWindow(QMainWindow):
         self.ghost_btn.setChecked(self.settings.ghost_mode)
         self.ghost_indicator.setVisible(self.settings.ghost_mode)
 
-        # Sync paste count spinbox without triggering _on_paste_count_changed
         self.paste_count_spin.blockSignals(True)
         self.paste_count_spin.setValue(getattr(self.settings, 'paste_all_count', 0))
         self.paste_count_spin.blockSignals(False)
 
-        # App detector rules
         rules = self.db.get_tab_rules()
         self.app_detector.set_rules(rules)
-
-        # Refresh all UI text for current language
         self._refresh_ui_text()
 
     def _refresh_ui_text(self):
-        """Update all UI labels/tooltips for the current language."""
         self._settings_btn.setToolTip(t("settings"))
         self.search_bar.setPlaceholderText(t("search_placeholder"))
         self.mode_btn.setToolTip(t("picking_style"))
@@ -1323,13 +1326,11 @@ class MainWindow(QMainWindow):
             self.collapse_all_btn.setToolTip(t("collapse_all"))
         else:
             self.collapse_all_btn.setToolTip(t("expand_all"))
-        # Tray menu
         if hasattr(self, '_tray_show_action'):
             self._tray_show_action.setText(t("tray_show"))
             self._tray_ghost_action.setText(t("tray_ghost"))
             self._tray_settings_action.setText(t("tray_settings"))
             self._tray_quit_action.setText(t("tray_quit"))
-        # Reload item widgets so context menus use new language
         self._load_items()
 
     # ═══════════════════════════════════════════════════
@@ -1337,7 +1338,6 @@ class MainWindow(QMainWindow):
     # ═══════════════════════════════════════════════════
     def _setup_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
-        # Use app icon from assets, fallback to generated icon
         app_icon = QApplication.instance().windowIcon()
         if app_icon.isNull():
             pix = QPixmap(32, 32)
@@ -1356,7 +1356,6 @@ class MainWindow(QMainWindow):
         self.tray_icon.setIcon(app_icon)
         self.tray_icon.setToolTip(APP_NAME)
 
-        # Tray menu
         tray_menu = QMenu()
         self._tray_show_action = QAction(t("tray_show"), self)
         self._tray_show_action.triggered.connect(self._animate_show)
@@ -1385,6 +1384,10 @@ class MainWindow(QMainWindow):
         self.tray_icon.activated.connect(self._on_tray_activated)
         self.tray_icon.show()
 
+        # 4.3 — Rebuild tray menu on each right-click so last 5 items are fresh
+        tray_menu.aboutToShow.connect(self._rebuild_tray_menu)
+        self._tray_menu = tray_menu
+
     def _on_tray_activated(self, reason):
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             if self.isVisible():
@@ -1396,13 +1399,11 @@ class MainWindow(QMainWindow):
         self._animate_hide()
 
     def _quit_app(self):
-        # Save state
         self.settings.window_x = self.x()
         self.settings.window_y = self.y()
         self.settings.window_width = self.width()
         self.settings.window_height = self.height()
         self.db.save_all_settings(self.settings)
-
         self._hotkey_mgr.unregister_all()
         self.monitor.stop()
         self.hud.close()
@@ -1433,7 +1434,6 @@ class MainWindow(QMainWindow):
         key = event.key()
         mods = event.modifiers()
 
-        # Escape — stop paste-all if active, otherwise hide window
         if key == Qt.Key.Key_Escape:
             if self._paste_all_active:
                 self._paste_all_active = False
@@ -1444,56 +1444,47 @@ class MainWindow(QMainWindow):
                 self._animate_hide()
             return
 
-        # Enter — paste selected item (copy to clipboard)
-        if key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
+        if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
             selected = self._get_selected_item()
             if selected:
                 self._paste_item(selected)
             return
 
-        # Delete — delete selected item
-        if key == Qt.Key.Key_Delete:
+        if key == Qt.Key.Key_Delete and not (mods & Qt.KeyboardModifier.ControlModifier):
             selected = self._get_selected_item()
             if selected:
                 self._delete_item(selected)
             return
 
-        # Ctrl+D — delete selected item
         if key == Qt.Key.Key_D and mods & Qt.KeyboardModifier.ControlModifier:
             selected = self._get_selected_item()
             if selected:
                 self._delete_item(selected)
             return
 
-        # Ctrl+P — pin/unpin selected item
         if key == Qt.Key.Key_P and mods & Qt.KeyboardModifier.ControlModifier:
             selected = self._get_selected_item()
             if selected:
                 self._toggle_pin(selected)
             return
 
-        # Ctrl+Shift+Delete — clear all unpinned
         if key == Qt.Key.Key_Delete and mods & Qt.KeyboardModifier.ControlModifier:
             self._clear_tab()
             return
 
-        # Ctrl+N — paste next from magazine (skip + paste)
         if key == Qt.Key.Key_N and mods & Qt.KeyboardModifier.ControlModifier:
             self._fire_magazine()
             return
 
-        # Ctrl+F — focus search bar
         if key == Qt.Key.Key_F and mods & Qt.KeyboardModifier.ControlModifier:
             self.search_bar.setFocus()
             self.search_bar.selectAll()
             return
 
-        # Ctrl+G — toggle ghost mode
         if key == Qt.Key.Key_G and mods & Qt.KeyboardModifier.ControlModifier:
             self._toggle_ghost_mode()
             return
 
-        # Up/Down — navigate items
         if key == Qt.Key.Key_Up:
             self._select_prev_item()
             return
@@ -1501,7 +1492,6 @@ class MainWindow(QMainWindow):
             self._select_next_item()
             return
 
-        # 1-9 — quick paste item by position
         if Qt.Key.Key_1 <= key <= Qt.Key.Key_9 and mods & Qt.KeyboardModifier.ControlModifier:
             idx = key - Qt.Key.Key_1
             if idx < len(self._item_widgets):
@@ -1514,7 +1504,6 @@ class MainWindow(QMainWindow):
         for w in self._item_widgets:
             if w._selected:
                 return w.item
-        # If nothing selected, use the first item
         if self._item_widgets:
             return self._item_widgets[0].item
         return None
@@ -1522,11 +1511,7 @@ class MainWindow(QMainWindow):
     def _select_prev_item(self):
         if not self._item_widgets:
             return
-        current_idx = -1
-        for i, w in enumerate(self._item_widgets):
-            if w._selected:
-                current_idx = i
-                break
+        current_idx = next((i for i, w in enumerate(self._item_widgets) if w._selected), -1)
         new_idx = max(0, current_idx - 1)
         for w in self._item_widgets:
             w.set_selected(False)
@@ -1536,11 +1521,7 @@ class MainWindow(QMainWindow):
     def _select_next_item(self):
         if not self._item_widgets:
             return
-        current_idx = -1
-        for i, w in enumerate(self._item_widgets):
-            if w._selected:
-                current_idx = i
-                break
+        current_idx = next((i for i, w in enumerate(self._item_widgets) if w._selected), -1)
         new_idx = min(len(self._item_widgets) - 1, current_idx + 1)
         for w in self._item_widgets:
             w.set_selected(False)
@@ -1553,3 +1534,196 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         event.ignore()
         self._minimize_to_tray()
+
+    # ═══════════════════════════════════════════════════
+    #  PHASE 4.3 — Dynamic tray menu with last 5 items
+    # ═══════════════════════════════════════════════════
+    def _rebuild_tray_menu(self):
+        """Rebuild the tray context menu with current last 5 items."""
+        menu = self._tray_menu
+        menu.clear()
+
+        menu.addAction(t("tray_show"), self._animate_show)
+
+        ghost_action = menu.addAction(t("tray_ghost"))
+        ghost_action.setCheckable(True)
+        ghost_action.setChecked(self._ghost_mode)
+        ghost_action.triggered.connect(self._toggle_ghost_mode)
+        self._tray_ghost_action = ghost_action
+
+        menu.addSeparator()
+
+        # Last 5 recent items for quick paste
+        recent = self.db.get_items(self._current_tab, limit=5)
+        if recent:
+            recent_menu = menu.addMenu(t("tray_recent"))
+            for item in recent:
+                label = (item.preview or "")[:50].replace('\n', ' ')
+                action = recent_menu.addAction(label)
+                action.triggered.connect(lambda checked, i=item: self._paste_item(i))
+
+        menu.addSeparator()
+        menu.addAction(t("tray_settings"), self._open_settings)
+        menu.addSeparator()
+        menu.addAction(t("tray_quit"), self._quit_app)
+
+    # ═══════════════════════════════════════════════════
+    #  PHASE 2.2 — Tray icon ghost mode indicator
+    # ═══════════════════════════════════════════════════
+    def _update_tray_icon(self):
+        """Change tray icon color to show ghost mode state."""
+        pix = QPixmap(32, 32)
+        pix.fill(QColor(0, 0, 0, 0))
+        painter = QPainter(pix)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Ghost mode = dim gray; normal = accent blue
+        color = QColor(100, 100, 110) if self._ghost_mode else QColor(79, 124, 255)
+        painter.setBrush(color)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(2, 2, 28, 28, 8, 8)
+        painter.setPen(QColor(255, 255, 255))
+        font = QFont(FONT_FAMILY, 14, QFont.Weight.Bold)
+        painter.setFont(font)
+        label_text = "G" if self._ghost_mode else "C"
+        painter.drawText(pix.rect(), Qt.AlignmentFlag.AlignCenter, label_text)
+        painter.end()
+        self.tray_icon.setIcon(QIcon(pix))
+
+    # ═══════════════════════════════════════════════════
+    #  PHASE 5.1 — Quick Paste Popup
+    # ═══════════════════════════════════════════════════
+    def _show_quick_paste_popup(self):
+        """Open the quick paste popup at the current cursor position."""
+        from cyberclip.gui.quick_paste_popup import QuickPastePopup
+        if self._quick_paste_popup is None:
+            self._quick_paste_popup = QuickPastePopup()
+            self._quick_paste_popup.paste_requested.connect(self._paste_item)
+        items = self.db.get_items(limit=QUICK_PASTE_MAX_ITEMS)
+        self._quick_paste_popup.show_at_cursor(items)
+
+    # ═══════════════════════════════════════════════════
+    #  PHASE 5.2 — Text Transforms
+    # ═══════════════════════════════════════════════════
+    @pyqtSlot(ClipboardItem, str)
+    def _on_transform_requested(self, item: ClipboardItem, transform_key: str):
+        """Apply a text transform and add the result as a new clip."""
+        from cyberclip.utils.text_transforms import apply as apply_transform
+        new_text = apply_transform(transform_key, item.text_content)
+        if new_text == item.text_content:
+            return  # no change
+        new_item = ClipboardItem(
+            content_type=item.content_type,
+            text_content=new_text,
+            source_app="CyberClip (transform)",
+            tab=item.tab,
+        )
+        # 1.6 — suppress before writing to clipboard
+        self.monitor.suppress_next()
+        self.db.add_item(new_item, max_items=getattr(self.settings, 'max_items', 200))
+        if new_item.tab == self._current_tab:
+            self._add_item_widget(new_item, animate=True)
+            self._update_empty_state()
+            self._update_count()
+        QApplication.clipboard().setText(new_text)
+        self.status_label.setText(f"✓ Transform: {transform_key.replace('transform_', '')}")
+        QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
+
+    # ═══════════════════════════════════════════════════
+    #  PHASE 5.4 — Save as Snippet
+    # ═══════════════════════════════════════════════════
+    @pyqtSlot(ClipboardItem)
+    def _on_save_snippet(self, item: ClipboardItem):
+        """Prompt for snippet name and trigger, then save."""
+        from PyQt6.QtWidgets import QInputDialog
+        from cyberclip.storage.models import Snippet
+        name, ok = QInputDialog.getText(self, t("snippet_name"), t("snippet_name") + ":")
+        if not ok or not name.strip():
+            return
+        trigger, ok2 = QInputDialog.getText(self, t("snippet_trigger"), t("snippet_trigger") + ":")
+        if not ok2 or not trigger.strip():
+            return
+        snippet = Snippet(name=name.strip(), trigger=trigger.strip().lower(),
+                          content=item.text_content)
+        self.db.add_snippet(snippet)
+        self.status_label.setText(t("snippet_saved"))
+        QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
+
+    # ═══════════════════════════════════════════════════
+    #  PHASE 5.5 — Export / Import
+    # ═══════════════════════════════════════════════════
+    def _export_history(self):
+        import json, base64
+        from datetime import datetime as dt
+        path, _ = QFileDialog.getSaveFileName(
+            self, t("export_history"), "cyberclip_export.json", "JSON Files (*.json)"
+        )
+        if not path:
+            return
+        items = self.db.get_items(limit=10000)
+        clips = []
+        for item in items:
+            entry = {
+                "content": item.text_content,
+                "type": item.content_type,
+                "created_at": item.created_at,
+                "is_pinned": item.pinned,
+                "is_sensitive": item.is_sensitive,
+                "tab": item.tab,
+            }
+            if item.image_path and os.path.exists(item.image_path):
+                with open(item.image_path, "rb") as f:
+                    entry["image_b64"] = base64.b64encode(f.read()).decode("ascii")
+            clips.append(entry)
+        export_data = {
+            "version": "1.0",
+            "exported_at": dt.now().isoformat(),
+            "clips": clips,
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(export_data, f, indent=2, ensure_ascii=False)
+        self.status_label.setText(t("export_done", count=len(clips)))
+        QTimer.singleShot(3000, lambda: self.status_label.setText(t("ready")))
+
+    def _import_history(self):
+        import json, base64, tempfile, os
+        path, _ = QFileDialog.getOpenFileName(
+            self, t("import_history"), "", "JSON Files (*.json)"
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            self.status_label.setText(t("db_error"))
+            return
+        clips = data.get("clips", [])
+        imported, skipped = 0, 0
+        for entry in clips:
+            text = entry.get("content", "")
+            ctype = entry.get("type", "text")
+            tab = entry.get("tab", "General")
+            if self.db.item_exists(text, tab):
+                skipped += 1
+                continue
+            image_path = ""
+            if "image_b64" in entry:
+                try:
+                    img_data = base64.b64decode(entry["image_b64"])
+                    image_path = self.image_store.save_bytes(img_data)
+                except Exception:
+                    pass
+            item = ClipboardItem(
+                content_type=ctype,
+                text_content=text,
+                image_path=image_path,
+                tab=tab,
+                pinned=entry.get("is_pinned", False),
+                created_at=entry.get("created_at", ""),
+                is_sensitive=entry.get("is_sensitive", False),
+            )
+            self.db.add_item(item, max_items=getattr(self.settings, 'max_items', 200))
+            imported += 1
+        self._load_items()
+        self.status_label.setText(t("import_done", count=imported, skipped=skipped))
+        QTimer.singleShot(3000, lambda: self.status_label.setText(t("ready")))

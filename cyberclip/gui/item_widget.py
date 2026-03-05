@@ -1,3 +1,7 @@
+# Modified: [2.1] Show masked indicator and lock icon for sensitive items;
+#           [5.2] "Transform" submenu in context menu using text_transforms.py;
+#           [5.3] Smart type icons for email, code, sensitive types;
+#           [5.4] "Save as Snippet" context menu action.
 """Individual clipboard item card widget with animations."""
 import os
 import json
@@ -17,9 +21,11 @@ from PyQt6.QtGui import QPixmap, QColor, QPainter, QCursor, QIcon, QDrag
 from cyberclip.storage.models import ClipboardItem
 from cyberclip.utils.constants import (
     TYPE_TEXT, TYPE_IMAGE, TYPE_FILE, TYPE_URL, TYPE_COLOR,
+    TYPE_EMAIL, TYPE_CODE, TYPE_SENSITIVE,
     NEON_CYAN, NEON_PURPLE, NEON_PINK, TEXT_DIM,
 )
 from cyberclip.utils.i18n import t
+from cyberclip.utils.text_transforms import TRANSFORMS
 
 
 class ClipItemWidget(QWidget):
@@ -31,23 +37,28 @@ class ClipItemWidget(QWidget):
     open_file_requested = pyqtSignal(str)
     start_from_here = pyqtSignal(ClipboardItem)
     view_image_requested = pyqtSignal(ClipboardItem)
+    transform_requested = pyqtSignal(ClipboardItem, str)  # 5.2 — (item, transform_key)
+    save_snippet_requested = pyqtSignal(ClipboardItem)    # 5.4
 
     # Nerd Font icons
-    ICON_TEXT = "\uf15c"    # 
-    ICON_IMAGE = "\uf03e"   # 
-    ICON_FILE = "\uf07b"    # 
-    ICON_URL = "\uf0c1"     # 
-    ICON_COLOR = "\uf53f"   # 
-    ICON_PIN = "\uf08d"     # 
+    ICON_TEXT = "\uf15c"
+    ICON_IMAGE = "\uf03e"
+    ICON_FILE = "\uf07b"
+    ICON_URL = "\uf0c1"
+    ICON_COLOR = "\uf53f"
+    ICON_EMAIL = "\uf0e0"    # 5.3 envelope
+    ICON_CODE = "\uf121"     # 5.3 code brackets
+    ICON_SENSITIVE = "\uf023"  # 2.1 lock icon
+    ICON_PIN = "\uf08d"
     ICON_UNPIN = "\uf08d"
-    ICON_PASTE = "\uf0ea"   # 
-    ICON_DELETE = "\uf2ed"  # 
-    ICON_OCR = "\uf065"     # 
-    ICON_COPY = "\uf0c5"    # 
-    ICON_OPEN = "\uf35d"    # 
-    ICON_VIEW = "\uf06e"    # eye icon
-    ICON_COLLAPSE = "\uf078"  # chevron down
-    ICON_EXPAND = "\uf077"    # chevron up
+    ICON_PASTE = "\uf0ea"
+    ICON_DELETE = "\uf2ed"
+    ICON_OCR = "\uf065"
+    ICON_COPY = "\uf0c5"
+    ICON_OPEN = "\uf35d"
+    ICON_VIEW = "\uf06e"
+    ICON_COLLAPSE = "\uf078"
+    ICON_EXPAND = "\uf077"
 
     TYPE_ICONS = {
         TYPE_TEXT: ICON_TEXT,
@@ -55,6 +66,9 @@ class ClipItemWidget(QWidget):
         TYPE_FILE: ICON_FILE,
         TYPE_URL: ICON_URL,
         TYPE_COLOR: ICON_COLOR,
+        TYPE_EMAIL: ICON_EMAIL,
+        TYPE_CODE: ICON_CODE,
+        TYPE_SENSITIVE: ICON_SENSITIVE,
     }
 
     def __init__(self, item: ClipboardItem, parent=None):
@@ -65,9 +79,10 @@ class ClipItemWidget(QWidget):
         self.setObjectName("ClipCard")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setProperty("pinned", str(item.pinned).lower())
+        self.setProperty("sensitive", str(item.is_sensitive).lower())  # 2.1
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         self.setMinimumHeight(40)
-        self._content_widgets = []  # track content area widgets for collapse
+        self._content_widgets = []
         self._setup_ui()
         self._setup_animation()
 
@@ -76,7 +91,7 @@ class ClipItemWidget(QWidget):
         main_layout.setContentsMargins(10, 8, 8, 8)
         main_layout.setSpacing(10)
 
-        # Magazine position badge (hidden by default)
+        # Magazine position badge
         self.queue_badge = QLabel("▶")
         self.queue_badge.setObjectName("QueueBadge")
         self.queue_badge.setFixedWidth(16)
@@ -84,26 +99,30 @@ class ClipItemWidget(QWidget):
         self.queue_badge.setVisible(False)
         main_layout.addWidget(self.queue_badge)
 
-        # Type icon
-        icon_text = self.TYPE_ICONS.get(self.item.content_type, self.ICON_TEXT)
+        # Type icon — 2.1: use lock for sensitive
+        effective_type = TYPE_SENSITIVE if self.item.is_sensitive else self.item.content_type
+        icon_text = self.TYPE_ICONS.get(effective_type, self.ICON_TEXT)
         self.type_icon = QLabel(icon_text)
         self.type_icon.setObjectName("ClipTypeIcon")
         self.type_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.type_icon.setFixedSize(32, 32)
+        if self.item.is_sensitive:
+            self.type_icon.setStyleSheet("color: #FFD60A;")  # yellow lock for sensitive
         main_layout.addWidget(self.type_icon)
 
-        # Content area — takes remaining space, shrinks as needed
+        # Content area
         content_widget = QWidget()
         content_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         content_layout = QVBoxLayout(content_widget)
         content_layout.setSpacing(2)
         content_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Main content
         if self.item.content_type == TYPE_IMAGE:
             self._setup_image_content(content_layout)
         elif self.item.content_type == TYPE_COLOR:
             self._setup_color_content(content_layout)
+        elif self.item.is_sensitive:
+            self._setup_sensitive_content(content_layout)   # 2.1
         else:
             self._setup_text_content(content_layout)
 
@@ -117,7 +136,8 @@ class ClipItemWidget(QWidget):
         if self.item.source_app:
             app_name = self.item.source_app.replace(".exe", "")
             meta_parts.append(app_name)
-        if self.item.content_type == TYPE_TEXT:
+        if self.item.content_type in (TYPE_TEXT, TYPE_URL, TYPE_CODE, TYPE_EMAIL) \
+                and not self.item.is_sensitive:
             char_count = len(self.item.text_content)
             word_count = len(self.item.text_content.split())
             line_count = self.item.text_content.count('\n') + 1
@@ -133,12 +153,11 @@ class ClipItemWidget(QWidget):
 
         main_layout.addWidget(content_widget, 1)
 
-        # Action buttons (right side)
+        # Action buttons
         actions_layout = QHBoxLayout()
         actions_layout.setSpacing(2)
         actions_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Collapse/Expand button (default: compact view, click to expand)
         self.collapse_btn = QPushButton(self.ICON_EXPAND)
         self.collapse_btn.setObjectName("ClipAction")
         self.collapse_btn.setFixedSize(28, 28)
@@ -146,7 +165,6 @@ class ClipItemWidget(QWidget):
         self.collapse_btn.clicked.connect(self._toggle_collapse)
         actions_layout.addWidget(self.collapse_btn)
 
-        # Pin button
         self.pin_btn = QPushButton(self.ICON_PIN)
         self.pin_btn.setObjectName("PinButton")
         self.pin_btn.setProperty("pinned", str(self.item.pinned).lower())
@@ -155,17 +173,16 @@ class ClipItemWidget(QWidget):
         self.pin_btn.clicked.connect(lambda: self.pin_toggled.emit(self.item))
         actions_layout.addWidget(self.pin_btn)
 
-        # Paste button
-        paste_btn = QPushButton(self.ICON_PASTE)
-        paste_btn.setObjectName("ClipAction")
-        paste_btn.setFixedSize(28, 28)
-        paste_btn.setToolTip(t("paste"))
-        paste_btn.clicked.connect(lambda: self.paste_requested.emit(self.item))
-        actions_layout.addWidget(paste_btn)
+        # Don't show Paste for sensitive items to prevent accidental exposure
+        if not self.item.is_sensitive:
+            paste_btn = QPushButton(self.ICON_PASTE)
+            paste_btn.setObjectName("ClipAction")
+            paste_btn.setFixedSize(28, 28)
+            paste_btn.setToolTip(t("paste"))
+            paste_btn.clicked.connect(lambda: self.paste_requested.emit(self.item))
+            actions_layout.addWidget(paste_btn)
 
-        # Type-specific buttons
         if self.item.content_type == TYPE_IMAGE:
-            # View image button
             view_btn = QPushButton(self.ICON_VIEW)
             view_btn.setObjectName("ClipAction")
             view_btn.setFixedSize(28, 28)
@@ -185,19 +202,18 @@ class ClipItemWidget(QWidget):
             open_btn.setObjectName("ClipAction")
             open_btn.setFixedSize(28, 28)
             open_btn.setToolTip(t("open_explorer"))
-            open_btn.clicked.connect(lambda: self.open_file_requested.emit(self.item.text_content))
+            open_btn.clicked.connect(
+                lambda: self.open_file_requested.emit(self.item.text_content))
             actions_layout.addWidget(open_btn)
 
-        # Copy button for text/url
-        if self.item.content_type in (TYPE_TEXT, TYPE_URL):
+        if self.item.content_type in (TYPE_TEXT, TYPE_URL, TYPE_CODE, TYPE_EMAIL):
             copy_btn = QPushButton(self.ICON_COPY)
             copy_btn.setObjectName("ClipAction")
             copy_btn.setFixedSize(28, 28)
             copy_btn.setToolTip(t("copy"))
-            copy_btn.clicked.connect(lambda: self._copy_to_clipboard())
+            copy_btn.clicked.connect(self._copy_to_clipboard)
             actions_layout.addWidget(copy_btn)
 
-        # Delete button
         del_btn = QPushButton(self.ICON_DELETE)
         del_btn.setObjectName("ClipAction")
         del_btn.setFixedSize(28, 28)
@@ -207,10 +223,19 @@ class ClipItemWidget(QWidget):
 
         main_layout.addLayout(actions_layout)
 
+    # ── Content area builders ─────────────────────────────────────────────
+
+    def _setup_sensitive_content(self, layout):
+        """2.1 — Show masked/redacted indicator for sensitive items."""
+        masked_label = QLabel(t("sensitive_masked"))
+        masked_label.setObjectName("ClipContent")
+        masked_label.setStyleSheet("color: #FFD60A; font-style: italic;")
+        masked_label.setFixedHeight(22)
+        layout.addWidget(masked_label)
+
     def _setup_text_content(self, layout):
         text = self.item.text_content or self.item.preview
         lines = text.split('\n')
-        # Collapsed preview (compact — always visible)
         first_line = lines[0][:80]
         if len(lines[0]) > 80:
             first_line += "…"
@@ -224,15 +249,19 @@ class ClipItemWidget(QWidget):
         self.content_label.setTextFormat(Qt.TextFormat.PlainText)
         self.content_label.setFixedHeight(22)
         self.content_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        # 5.3 — Monospace font for code
+        if self.item.content_type == TYPE_CODE:
+            self.content_label.setStyleSheet("font-family: 'Consolas', monospace; font-size: 11px;")
         layout.addWidget(self.content_label)
 
-        # Expanded full content (hidden by default)
-        self.full_content_label = QLabel(text[:2000])  # limit to 2000 chars
+        self.full_content_label = QLabel(text[:2000])
         self.full_content_label.setObjectName("ClipContent")
         self.full_content_label.setWordWrap(True)
         self.full_content_label.setTextInteractionFlags(
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
+        if self.item.content_type == TYPE_CODE:
+            self.full_content_label.setStyleSheet("font-family: 'Consolas', monospace; font-size: 11px;")
         self.full_content_label.setVisible(False)
         layout.addWidget(self.full_content_label)
         self._content_widgets.append(self.full_content_label)
@@ -243,16 +272,12 @@ class ClipItemWidget(QWidget):
         self.thumb_label.setStyleSheet(
             "border-radius: 6px; border: 1px solid rgba(255,255,255,0.08); padding: 0px;"
         )
-
         pix = None
         if os.path.exists(self.item.image_path):
             pix = QPixmap(self.item.image_path)
             if not pix.isNull():
-                # Cap height at 80px, scale to fit
                 if pix.height() > 80:
-                    scaled = pix.scaledToHeight(
-                        80, Qt.TransformationMode.SmoothTransformation
-                    )
+                    scaled = pix.scaledToHeight(80, Qt.TransformationMode.SmoothTransformation)
                 else:
                     scaled = pix
                 self.thumb_label.setPixmap(scaled)
@@ -260,7 +285,6 @@ class ClipItemWidget(QWidget):
         layout.addWidget(self.thumb_label, 0, Qt.AlignmentFlag.AlignLeft)
         self._content_widgets.append(self.thumb_label)
 
-        # Image info line
         info_parts = []
         if pix and not pix.isNull():
             info_parts.append(f"{pix.width()}×{pix.height()}")
@@ -270,7 +294,6 @@ class ClipItemWidget(QWidget):
                 info_parts.append(f"{size_bytes / (1024*1024):.1f} MB")
             else:
                 info_parts.append(f"{size_bytes / 1024:.1f} KB")
-
         if info_parts:
             info_label = QLabel("  ·  ".join(info_parts))
             info_label.setObjectName("ClipMeta")
@@ -280,7 +303,6 @@ class ClipItemWidget(QWidget):
         color_layout = QHBoxLayout()
         color_layout.setContentsMargins(0, 0, 0, 0)
         color_layout.setSpacing(8)
-
         self.swatch = QLabel()
         self.swatch.setObjectName("ColorSwatch")
         self.swatch.setFixedSize(32, 20)
@@ -290,18 +312,16 @@ class ClipItemWidget(QWidget):
             f"border: 1px solid rgba(255,255,255,0.15);"
         )
         color_layout.addWidget(self.swatch)
-
         color_label = QLabel(color_str)
         color_label.setObjectName("ClipContent")
         color_layout.addWidget(color_label, 1)
-
         layout.addLayout(color_layout)
 
+    # ── Collapse / expand ─────────────────────────────────────────────────
+
     def _toggle_collapse(self):
-        """Toggle between compact preview and expanded full content."""
         self._collapsed = not self._collapsed
         if self._collapsed:
-            # Expanded state: show full content, hide compact preview
             if hasattr(self, 'content_label'):
                 self.content_label.setVisible(False)
             for w in self._content_widgets:
@@ -309,13 +329,14 @@ class ClipItemWidget(QWidget):
             self.collapse_btn.setText(self.ICON_COLLAPSE)
             self.collapse_btn.setToolTip(t("collapse"))
         else:
-            # Collapsed/compact state: show compact preview, hide full content
             if hasattr(self, 'content_label'):
                 self.content_label.setVisible(True)
             for w in self._content_widgets:
                 w.setVisible(False)
             self.collapse_btn.setText(self.ICON_EXPAND)
             self.collapse_btn.setToolTip(t("expand"))
+
+    # ── Animation ─────────────────────────────────────────────────────────
 
     def _setup_animation(self):
         self._opacity_effect = QGraphicsOpacityEffect(self)
@@ -325,47 +346,42 @@ class ClipItemWidget(QWidget):
     def animate_in(self, delay_ms: int = 0):
         self._opacity_effect.setOpacity(0.0)
         self.setMaximumHeight(0)
-
         group = QParallelAnimationGroup(self)
-
         opacity_anim = QPropertyAnimation(self._opacity_effect, b"opacity")
         opacity_anim.setDuration(350)
         opacity_anim.setStartValue(0.0)
         opacity_anim.setEndValue(1.0)
         opacity_anim.setEasingCurve(QEasingCurve.Type.OutQuart)
         group.addAnimation(opacity_anim)
-
         height_anim = QPropertyAnimation(self, b"maximumHeight")
         height_anim.setDuration(400)
         height_anim.setStartValue(0)
         height_anim.setEndValue(160)
         height_anim.setEasingCurve(QEasingCurve.Type.OutQuart)
         group.addAnimation(height_anim)
-
         QTimer.singleShot(delay_ms, group.start)
         self._anim_group = group
 
     def animate_out(self, callback=None):
         group = QParallelAnimationGroup(self)
-
         opacity_anim = QPropertyAnimation(self._opacity_effect, b"opacity")
         opacity_anim.setDuration(250)
         opacity_anim.setStartValue(1.0)
         opacity_anim.setEndValue(0.0)
         opacity_anim.setEasingCurve(QEasingCurve.Type.InQuart)
         group.addAnimation(opacity_anim)
-
         height_anim = QPropertyAnimation(self, b"maximumHeight")
         height_anim.setDuration(300)
         height_anim.setStartValue(self.height())
         height_anim.setEndValue(0)
         height_anim.setEasingCurve(QEasingCurve.Type.InQuart)
         group.addAnimation(height_anim)
-
         if callback:
             group.finished.connect(callback)
         group.start()
         self._anim_group = group
+
+    # ── State setters ──────────────────────────────────────────────────────
 
     def set_selected(self, selected: bool):
         self._selected = selected
@@ -374,7 +390,6 @@ class ClipItemWidget(QWidget):
         self.style().polish(self)
 
     def set_magazine_active(self, active: bool):
-        """Highlight this item as the current magazine queue item."""
         self.queue_badge.setVisible(active)
         self.setProperty("magazine_active", str(active).lower())
         self.style().unpolish(self)
@@ -389,6 +404,8 @@ class ClipItemWidget(QWidget):
         self.pin_btn.style().polish(self.pin_btn)
         self.style().unpolish(self)
         self.style().polish(self)
+
+    # ── Mouse events ──────────────────────────────────────────────────────
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
@@ -416,13 +433,14 @@ class ClipItemWidget(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             if self.item.content_type == TYPE_IMAGE:
                 self.view_image_requested.emit(self.item)
-            else:
+            elif not self.item.is_sensitive:
                 self.paste_requested.emit(self.item)
         super().mouseDoubleClickEvent(event)
 
+    # ── Context menu ──────────────────────────────────────────────────────
+
     def _show_context_menu(self, pos):
         menu = QMenu(self)
-        # Force opaque dark background (QSS alone may not override popup transparency)
         menu.setStyleSheet(
             "QMenu { background-color: #1C1C1E; border: 1px solid rgba(255,255,255,0.12); "
             "border-radius: 8px; padding: 4px 0px; }"
@@ -432,26 +450,46 @@ class ClipItemWidget(QWidget):
             "QMenu::separator { height: 1px; background-color: rgba(255,255,255,0.08); "
             "margin: 4px 12px; }"
         )
+
         menu.addAction(t("ctx_start_here"), lambda: self.start_from_here.emit(self.item))
         menu.addSeparator()
-        menu.addAction(t("ctx_copy"), lambda: self._copy_to_clipboard())
+        menu.addAction(t("ctx_copy"), self._copy_to_clipboard)
         menu.addAction(t("ctx_pin"), lambda: self.pin_toggled.emit(self.item))
+
+        # 5.2 — Transform submenu (text types only, not sensitive)
+        if self.item.content_type in (TYPE_TEXT, TYPE_URL, TYPE_CODE, TYPE_EMAIL) \
+                and not self.item.is_sensitive:
+            transform_menu = menu.addMenu(t("ctx_transform"))
+            for key, _ in TRANSFORMS:
+                transform_menu.addAction(
+                    t(key), lambda _k=key: self.transform_requested.emit(self.item, _k)
+                )
+
+        # 5.4 — Save as snippet
+        if self.item.content_type in (TYPE_TEXT, TYPE_CODE) and not self.item.is_sensitive:
+            menu.addAction(t("ctx_save_snippet"),
+                           lambda: self.save_snippet_requested.emit(self.item))
 
         if self.item.content_type == TYPE_IMAGE:
             menu.addSeparator()
-            menu.addAction(t("ctx_view_image"), lambda: self.view_image_requested.emit(self.item))
+            menu.addAction(t("ctx_view_image"),
+                           lambda: self.view_image_requested.emit(self.item))
             menu.addAction(t("ctx_ocr"), lambda: self.ocr_requested.emit(self.item))
 
         if self.item.content_type == TYPE_FILE:
             menu.addSeparator()
             menu.addAction(t("ctx_open_explorer"),
-                          lambda: self.open_file_requested.emit(self.item.text_content))
+                           lambda: self.open_file_requested.emit(self.item.text_content))
 
         menu.addSeparator()
         menu.addAction(t("ctx_delete"), lambda: self.delete_requested.emit(self.item))
         menu.exec(pos)
 
+    # ── Clipboard copy ────────────────────────────────────────────────────
+
     def _copy_to_clipboard(self):
+        if self.item.is_sensitive:
+            return  # 2.1 — never copy sensitive content
         clipboard = QApplication.clipboard()
         if self.item.content_type == TYPE_IMAGE and self.item.image_path:
             pix = QPixmap(self.item.image_path)

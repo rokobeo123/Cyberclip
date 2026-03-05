@@ -1,4 +1,7 @@
+# Modified: [1.7] cleanup_orphans() now compares disk files against DB paths;
+#           delete_image() improved; startup_cleanup() entry point for app.py
 """Hidden folder image storage for clipboard images."""
+import logging
 import os
 import hashlib
 import time
@@ -8,6 +11,8 @@ from PIL import Image
 import io
 
 from cyberclip.utils.constants import IMAGE_STORE_DIR
+
+logger = logging.getLogger(__name__)
 
 
 class ImageStore:
@@ -51,26 +56,71 @@ class ImageStore:
 
     def load_image(self, filepath: str) -> Optional[bytes]:
         if os.path.exists(filepath):
-            with open(filepath, "rb") as f:
-                return f.read()
+            try:
+                with open(filepath, "rb") as f:
+                    return f.read()
+            except OSError as exc:
+                logger.warning("load_image failed for %s: %s", filepath, exc)
         return None
 
     def delete_image(self, filepath: str):
         try:
-            if os.path.exists(filepath):
+            if filepath and os.path.exists(filepath):
                 os.remove(filepath)
-        except Exception:
-            pass
+        except OSError as exc:
+            logger.warning("delete_image failed for %s: %s", filepath, exc)
 
+    # ── 1.7 Orphan cleanup ────────────────────────────────────────────────
     def cleanup_orphans(self, valid_paths: set):
-        for f in os.listdir(IMAGE_STORE_DIR):
-            fp = os.path.join(IMAGE_STORE_DIR, f)
+        """
+        Delete any image files in IMAGE_STORE_DIR that are NOT in *valid_paths*.
+        Called at startup with the set of image_path values from the database.
+        """
+        if not os.path.isdir(IMAGE_STORE_DIR):
+            return
+        removed = 0
+        for filename in os.listdir(IMAGE_STORE_DIR):
+            fp = os.path.join(IMAGE_STORE_DIR, filename)
+            if not os.path.isfile(fp):
+                continue
             if fp not in valid_paths:
                 try:
                     os.remove(fp)
-                except Exception:
-                    pass
+                    removed += 1
+                except OSError as exc:
+                    logger.warning("cleanup_orphans: could not remove %s: %s", fp, exc)
+        if removed:
+            logger.info("cleanup_orphans: removed %d orphaned image file(s)", removed)
 
+    def startup_cleanup(self, db) -> int:
+        """
+        1.7 — Compare image files on disk against DB references and delete orphans.
+        *db* must be a Database instance that exposes get_all_image_paths().
+        Returns number of orphan files removed.
+        """
+        try:
+            valid_paths = db.get_all_image_paths()
+        except Exception as exc:
+            logger.error("startup_cleanup: could not fetch image paths from DB: %s", exc)
+            return 0
+        if not os.path.isdir(IMAGE_STORE_DIR):
+            return 0
+        removed = 0
+        for filename in os.listdir(IMAGE_STORE_DIR):
+            fp = os.path.join(IMAGE_STORE_DIR, filename)
+            if not os.path.isfile(fp):
+                continue
+            if fp not in valid_paths:
+                try:
+                    os.remove(fp)
+                    removed += 1
+                except OSError as exc:
+                    logger.warning("startup_cleanup: could not remove %s: %s", fp, exc)
+        if removed:
+            logger.info("startup_cleanup: removed %d orphaned image(s)", removed)
+        return removed
+
+    # ── Thumbnail helpers ─────────────────────────────────────────────────
     def get_thumbnail(self, filepath: str, size: tuple = (80, 80)) -> Optional[bytes]:
         try:
             img = Image.open(filepath)
@@ -78,5 +128,6 @@ class ImageStore:
             buf = io.BytesIO()
             img.save(buf, "PNG")
             return buf.getvalue()
-        except Exception:
+        except Exception as exc:
+            logger.debug("get_thumbnail failed for %s: %s", filepath, exc)
             return None

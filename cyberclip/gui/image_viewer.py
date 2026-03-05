@@ -1,3 +1,4 @@
+# Modified: [3.5] Zoom bounds: min 10% (ZOOM_MIN), max 500% (ZOOM_MAX) — clamped before applying.
 """Image viewer dialog with zoom and pan."""
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -7,6 +8,7 @@ from PyQt6.QtCore import Qt, QPoint, QSize
 from PyQt6.QtGui import QPixmap, QPainter, QWheelEvent, QMouseEvent, QCursor
 
 from cyberclip.utils.i18n import t
+from cyberclip.utils.constants import ZOOM_MIN, ZOOM_MAX
 
 
 class ZoomableImageLabel(QLabel):
@@ -16,12 +18,10 @@ class ZoomableImageLabel(QLabel):
         super().__init__(parent)
         self._original = pixmap
         self._zoom = 1.0
-        self._min_zoom = 0.1
-        self._max_zoom = 10.0
-        self._pan_start = QPoint()
-        self._dragging = False
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setCursor(QCursor(Qt.CursorShape.OpenHandCursor))
+        self._pan_start = QPoint()
+        self._dragging = False
         self._update_display()
 
     @property
@@ -29,7 +29,8 @@ class ZoomableImageLabel(QLabel):
         return self._zoom
 
     def set_zoom(self, z: float):
-        self._zoom = max(self._min_zoom, min(self._max_zoom, z))
+        """3.5 — Clamp zoom to [ZOOM_MIN, ZOOM_MAX] before applying."""
+        self._zoom = max(ZOOM_MIN, min(ZOOM_MAX, z))
         self._update_display()
 
     def _update_display(self):
@@ -146,7 +147,7 @@ class ImageViewerDialog(QDialog):
         layout.addWidget(self.scroll_area, 1)
 
         # Info bar
-        info = QLabel(f"{pixmap.width()} × {pixmap.height()} px")
+        info = QLabel(f"{pixmap.width()} × {pixmap.height()} px  |  zoom: {int(ZOOM_MIN*100)}%–{int(ZOOM_MAX*100)}%")
         info.setStyleSheet("color: #555566; font-size: 10px;")
         info.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(info)

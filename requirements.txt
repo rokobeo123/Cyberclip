@@ -1,5 +1,7 @@
-PyQt6>=6.6.0
-pywin32>=306
-Pillow>=10.0.0
-pytesseract>=0.3.10
-psutil>=5.9.0
+# Modified: [6.1] pinned all dependency versions; added psutil, Pillow already present
+# New dependency: no new packages required for Phase 1; versions pinned as specified
+PyQt6==6.7.0
+pywin32==306
+Pillow==10.3.0
+pytesseract==0.3.10
+psutil==5.9.8

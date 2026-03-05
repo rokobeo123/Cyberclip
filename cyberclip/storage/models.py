@@ -1,3 +1,5 @@
+# Modified: [2.1] Added is_sensitive field and position field to ClipboardItem;
+#           [5.4] Added Snippet dataclass; [5.6] Added AppExclusion dataclass.
 """Data models for CyberClip clipboard items."""
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -7,7 +9,7 @@ from typing import Optional
 @dataclass
 class ClipboardItem:
     id: Optional[int] = None
-    content_type: str = "text"  # text, image, file, url, color
+    content_type: str = "text"  # text, image, file, url, color, email, code, sensitive
     text_content: str = ""
     image_path: str = ""
     source_app: str = ""
@@ -15,6 +17,8 @@ class ClipboardItem:
     pinned: bool = False
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     extra_data: str = ""  # JSON for color codes, cleaned URLs, etc.
+    is_sensitive: bool = False    # 2.1 — masked in UI, never stored plain
+    position: Optional[int] = None  # 4.2 — drag-and-drop order
 
     @property
     def preview(self):
@@ -22,6 +26,8 @@ class ClipboardItem:
             return "[Image]"
         if self.content_type == "file":
             return self.text_content
+        if self.is_sensitive:
+            return "[Sensitive data — masked]"
         text = self.text_content or ""
         if len(text) > 200:
             return text[:200] + "…"
@@ -58,6 +64,25 @@ class AppSettings:
     window_y: int = -1
     window_width: int = 420
     window_height: int = 680
-    paste_delay_ms: int = 500  # inter-paste delay for paste-all (ms); increase for slow web apps
-    max_items: int = 200       # maximum items kept per tab (oldest unpinned removed first)
-    paste_all_count: int = 0   # items per Ctrl+Shift+A press (0 = all remaining)
+    paste_delay_ms: int = 500
+    max_items: int = 200
+    paste_all_count: int = 0
+    exclusions: list = field(default_factory=list)  # 5.6 — per-app exclusion list
+
+
+@dataclass
+class Snippet:
+    """5.4 — Permanent user-defined snippet with trigger keyword."""
+    id: Optional[int] = None
+    name: str = ""
+    trigger: str = ""        # keyword that expands to content (e.g. "addr")
+    content: str = ""
+    created_at: str = field(default_factory=lambda: datetime.now().isoformat())
+
+
+@dataclass
+class AppExclusion:
+    """5.6 — Process name to exclude from clipboard monitoring."""
+    id: Optional[int] = None
+    process_name: str = ""   # e.g. "KeePass.exe"
+    enabled: bool = True
