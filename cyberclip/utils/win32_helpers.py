@@ -53,7 +53,7 @@ class KEYBDINPUT(Structure):
         ("wScan", wt.WORD),
         ("dwFlags", wt.DWORD),
         ("time", wt.DWORD),
-        ("dwExtraInfo", ctypes.POINTER(ctypes.c_ulong)),
+        ("dwExtraInfo", ctypes.c_size_t),
     ]
 
 
@@ -110,21 +110,41 @@ def send_ctrl_v():
 
 
 def send_ctrl_v_fast():
-    """Fast Ctrl+V injection for sequential paste.
-    Releases all modifier keys first (user may be holding Ctrl+Shift+A),
-    then sends a clean Ctrl+V via keybd_event."""
+    """Send Ctrl+V via SendInput — more compatible with web apps and Electron."""
     import time
-    # Release all modifier variants so target app sees pure Ctrl+V
     release_all_modifiers()
-    time.sleep(0.01)
-    # Send Ctrl+V
-    user32.keybd_event(VK_CONTROL, 0, 0, 0)
-    time.sleep(0.005)
-    user32.keybd_event(0x56, 0, 0, 0)   # V down
-    time.sleep(0.005)
-    user32.keybd_event(0x56, 0, KEYEVENTF_KEYUP, 0)   # V up
-    time.sleep(0.005)
-    user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+    time.sleep(0.015)
+    inputs = (INPUT * 4)()
+    inputs[0].type = INPUT_KEYBOARD; inputs[0].union.ki.wVk = VK_CONTROL; inputs[0].union.ki.dwFlags = 0
+    inputs[1].type = INPUT_KEYBOARD; inputs[1].union.ki.wVk = 0x56; inputs[1].union.ki.dwFlags = 0
+    inputs[2].type = INPUT_KEYBOARD; inputs[2].union.ki.wVk = 0x56; inputs[2].union.ki.dwFlags = KEYEVENTF_KEYUP
+    inputs[3].type = INPUT_KEYBOARD; inputs[3].union.ki.wVk = VK_CONTROL; inputs[3].union.ki.dwFlags = KEYEVENTF_KEYUP
+    user32.SendInput(4, ctypes.byref(inputs), ctypes.sizeof(INPUT))
+
+
+def set_foreground_robust(hwnd):
+    """Bring hwnd to foreground reliably — works for browsers and Electron apps."""
+    try:
+        user32.AllowSetForegroundWindow(0xFFFFFFFF)  # ASFW_ANY
+    except Exception:
+        pass
+    try:
+        cur = kernel32.GetCurrentThreadId()
+        fg = user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), None)
+        attached = False
+        if cur != fg:
+            attached = bool(user32.AttachThreadInput(cur, fg, True))
+        user32.ShowWindow(hwnd, 9)   # SW_RESTORE
+        user32.SetForegroundWindow(hwnd)
+        user32.BringWindowToTop(hwnd)
+        user32.SetFocus(hwnd)
+        if attached:
+            user32.AttachThreadInput(cur, fg, False)
+    except Exception:
+        try:
+            user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
 
 
 def get_foreground_hwnd():
@@ -157,7 +177,7 @@ def send_unicode_char(char):
     inp_down.union.ki.wScan = scan
     inp_down.union.ki.dwFlags = KEYEVENTF_UNICODE
     inp_down.union.ki.time = 0
-    inp_down.union.ki.dwExtraInfo = ctypes.pointer(ctypes.c_ulong(0))
+    inp_down.union.ki.dwExtraInfo = 0
 
     inp_up = INPUT()
     inp_up.type = INPUT_KEYBOARD
@@ -165,7 +185,7 @@ def send_unicode_char(char):
     inp_up.union.ki.wScan = scan
     inp_up.union.ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP
     inp_up.union.ki.time = 0
-    inp_up.union.ki.dwExtraInfo = ctypes.pointer(ctypes.c_ulong(0))
+    inp_up.union.ki.dwExtraInfo = 0
 
     arr = (INPUT * 2)(inp_down, inp_up)
     user32.SendInput(2, byref(arr), sizeof(INPUT))

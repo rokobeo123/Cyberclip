@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QLineEdit, QScrollArea, QApplication,
     QSizePolicy, QSystemTrayIcon, QMenu, QGraphicsOpacityEffect,
     QGraphicsDropShadowEffect, QSpinBox, QMessageBox, QFileDialog,
+    QProgressBar,
 )
 from PyQt6.QtCore import (
     Qt, pyqtSignal, pyqtSlot, QTimer, QPropertyAnimation,
@@ -92,6 +93,8 @@ class MainWindow(QMainWindow):
     ICON_COLLAPSE_ALL = "\uf066"
     ICON_EXPAND_ALL = "\uf065"
 
+    _inject_done = pyqtSignal()
+
     def __init__(self, db: Database = None, image_store: ImageStore = None):
         super().__init__()
         self.setWindowFlags(
@@ -160,6 +163,8 @@ class MainWindow(QMainWindow):
         self._paste_watchdog = QTimer(self)
         self._paste_watchdog.setSingleShot(True)
         self._paste_watchdog.timeout.connect(self._on_paste_watchdog)
+
+        self._inject_done.connect(self._after_paste, Qt.ConnectionType.QueuedConnection)
 
         self.magazine.queue_changed.connect(self._on_queue_changed)
 
@@ -235,6 +240,7 @@ class MainWindow(QMainWindow):
 
         title_label = QLabel(APP_NAME)
         title_label.setObjectName("TitleLabel")
+        title_label.setToolTip("Show/Hide: Ctrl+Shift+C")
         tb_layout.addWidget(title_label)
         tb_layout.addStretch()
 
@@ -283,6 +289,14 @@ class MainWindow(QMainWindow):
 
         search_layout.addWidget(search_icon)
         search_layout.addWidget(self.search_bar)
+
+        self._search_clear_btn = QPushButton("×")
+        self._search_clear_btn.setObjectName("SearchClearBtn")
+        self._search_clear_btn.setFixedSize(20, 20)
+        self._search_clear_btn.setVisible(False)
+        self._search_clear_btn.clicked.connect(self._clear_search)
+        search_layout.addWidget(self._search_clear_btn)
+
         main_layout.addWidget(search_container)
 
         # ── Tab Bar ──
@@ -411,7 +425,7 @@ class MainWindow(QMainWindow):
         self.empty_widget = QWidget()
         empty_layout = QVBoxLayout(self.empty_widget)
         empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_icon = QLabel("◈")
+        empty_icon = QLabel("\uf328")
         empty_icon.setObjectName("EmptyIcon")
         empty_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         empty_layout.addWidget(empty_icon)
@@ -432,6 +446,13 @@ class MainWindow(QMainWindow):
         self.status_label.setObjectName("StatusLabel")
         sb_layout.addWidget(self.status_label)
         sb_layout.addStretch()
+
+        self.paste_progress = QProgressBar()
+        self.paste_progress.setObjectName("PasteProgress")
+        self.paste_progress.setFixedHeight(3)
+        self.paste_progress.setTextVisible(False)
+        self.paste_progress.setVisible(False)
+        sb_layout.insertWidget(1, self.paste_progress)
 
         self.magazine_label = QLabel("")
         self.magazine_label.setObjectName("MagazineCounter")
@@ -667,7 +688,7 @@ class MainWindow(QMainWindow):
                 return
 
             self._paste_busy = True
-            self._paste_watchdog.start(6000)
+            self._paste_watchdog.start(8000)
 
             # 1.6 — suppress BEFORE writing to clipboard
             self.monitor.suppress_next()
@@ -703,7 +724,7 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, self._after_paste)
                 return
 
-            settle_ms = 300 if self._paste_item_is_image else 100
+            settle_ms = 400 if self._paste_item_is_image else 120
             QTimer.singleShot(settle_ms, self._do_inject_paste)
 
         except Exception:
@@ -714,34 +735,38 @@ class MainWindow(QMainWindow):
             self.monitor.resume()
 
     def _do_inject_paste(self):
+        import threading
+        threading.Thread(target=self._inject_paste_thread, daemon=True).start()
+
+    def _inject_paste_thread(self):
+        import time
         try:
             from cyberclip.utils.win32_helpers import (
-                send_ctrl_v_fast, send_key, set_foreground,
-                VK_RETURN, VK_TAB, KEYEVENTF_KEYUP,
+                send_ctrl_v_fast, set_foreground_robust, release_all_modifiers,
+                send_key, VK_RETURN, VK_TAB, KEYEVENTF_KEYUP,
             )
-            import time
-
             if self._target_hwnd:
-                set_foreground(self._target_hwnd)
-                time.sleep(0.15)
-
+                set_foreground_robust(self._target_hwnd)
+                time.sleep(0.10)
+            release_all_modifiers()
+            time.sleep(0.02)
             send_ctrl_v_fast()
-
             if self.settings.auto_enter:
-                time.sleep(0.02)
+                time.sleep(0.05)
                 send_key(vk=VK_RETURN)
                 time.sleep(0.01)
                 send_key(vk=VK_RETURN, flags=KEYEVENTF_KEYUP)
             elif self.settings.auto_tab:
-                time.sleep(0.02)
+                time.sleep(0.05)
                 send_key(vk=VK_TAB)
                 time.sleep(0.01)
                 send_key(vk=VK_TAB, flags=KEYEVENTF_KEYUP)
-
-            QTimer.singleShot(60, self._after_paste)
-        except Exception:
-            self._paste_busy = False
-            QTimer.singleShot(0, self._after_paste)
+            time.sleep(0.06)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("inject_paste_thread error: %s", exc)
+        finally:
+            self._inject_done.emit()  # thread-safe signal → calls _after_paste on main thread
 
     def _after_paste(self):
         try:
@@ -751,6 +776,8 @@ class MainWindow(QMainWindow):
 
             if self._paste_all_active:
                 self._paste_all_done += 1
+                self.paste_progress.setValue(self._paste_all_done * 100 // max(1, self._paste_all_total))
+                self.paste_progress.setVisible(True)
 
             peek = self.magazine.peek()
 
@@ -787,6 +814,7 @@ class MainWindow(QMainWindow):
                     self._paste_all_active = False
                     self._paste_all_total = 0
                     self._paste_all_done = 0
+                    self.paste_progress.setVisible(False)
         except Exception:
             self._paste_busy = False
             self._paste_all_active = False
@@ -796,6 +824,7 @@ class MainWindow(QMainWindow):
             self._paste_all_done = 0
             self._paste_item_is_image = False
             self._paste_watchdog.stop()
+            self.paste_progress.setVisible(False)
 
     def _on_paste_watchdog(self):
         self._paste_busy = False
@@ -805,6 +834,7 @@ class MainWindow(QMainWindow):
         self._paste_all_total = 0
         self._paste_all_done = 0
         self._paste_item_is_image = False
+        self.paste_progress.setVisible(False)
         self.monitor.resume()
         msg = t("paste_timeout")
         self.hud.notify(msg, 3000)
@@ -1010,12 +1040,6 @@ class MainWindow(QMainWindow):
             if reply != QMessageBox.StandardButton.Yes:
                 return
 
-        try:
-            from cyberclip.utils.win32_helpers import get_foreground_hwnd
-            self._target_hwnd = get_foreground_hwnd()
-        except Exception:
-            self._target_hwnd = None
-
         self._paste_all_active = True
         self._paste_all_done = 0
         self._paste_all_total = count
@@ -1096,6 +1120,16 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(4000, lambda: self.status_label.setText(t("ready")))
 
     def _on_global_hotkey(self, action: str):
+        # Capture target window immediately before any focus changes
+        if action in ("sequential_paste", "paste_all", "skip_item"):
+            try:
+                from cyberclip.utils.win32_helpers import get_foreground_hwnd
+                hwnd = get_foreground_hwnd()
+                own_hwnd = int(self.winId())
+                if hwnd and hwnd != own_hwnd:
+                    self._target_hwnd = hwnd
+            except Exception:
+                pass
         if action == "sequential_paste":
             self._sequential_paste()
         elif action == "paste_all":
@@ -1212,7 +1246,11 @@ class MainWindow(QMainWindow):
     def _on_search(self, text: str):
         """Restart debounce timer on every keystroke."""
         self._search_query = text.strip()
+        self._search_clear_btn.setVisible(bool(text))
         self._search_timer.start()  # restarts if already running
+
+    def _clear_search(self):
+        self.search_bar.clear()
 
     def _perform_search(self):
         """Actually execute the search after debounce delay."""

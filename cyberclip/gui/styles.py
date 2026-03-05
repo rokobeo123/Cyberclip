@@ -524,4 +524,29 @@ QTabBar::tab:hover:!selected {{
     background: rgba(255,255,255,0.04);
     color: {TEXT_PRIMARY};
 }}
+
+/* ── Search Clear Button ─────────────────────────────── */
+#SearchClearBtn {{
+    background: transparent;
+    border: none;
+    color: #888;
+    font-size: 14px;
+    border-radius: 10px;
+    padding: 0;
+}}
+#SearchClearBtn:hover {{
+    background: rgba(255,255,255,0.1);
+    color: #E0E0E0;
+}}
+
+/* ── Paste Progress Bar ──────────────────────────────── */
+#PasteProgress {{
+    background: transparent;
+    border: none;
+    border-radius: 1px;
+}}
+#PasteProgress::chunk {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0A84FF, stop:1 #5E5CE6);
+    border-radius: 1px;
+}}
 """

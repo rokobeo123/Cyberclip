@@ -7,9 +7,12 @@ import re
 import json
 import ctypes
 import hashlib
+import logging
 import threading
 import time
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from PyQt6.QtCore import QObject, pyqtSignal, QTimer, pyqtSlot
 from PyQt6.QtWidgets import QApplication
@@ -186,7 +189,7 @@ class ClipboardMonitor(QObject):
             new_seq = self._seq_number
         with self._lock:
             self._seq_number = new_seq
-            self._skip_count = 2        # skip at least 2 seq changes from our set+paste
+            self._skip_count = 0
             self._ignore_next_change = False
             self._paused = False
 
@@ -266,8 +269,8 @@ class ClipboardMonitor(QObject):
 
         try:
             self._process_clipboard(mime, clipboard)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("clipboard check error: %s", exc)
 
     def _is_blacklisted(self) -> bool:
         with self._lock:
@@ -312,12 +315,15 @@ class ClipboardMonitor(QObject):
                 if ptr is not None:
                     try:
                         ptr.setsize(img.sizeInBytes())
-                        img_hash = hashlib.md5(bytes(ptr)).hexdigest()
-                        if img_hash == self._last_image_hash:
-                            return
-                        self._last_image_hash = img_hash
-                    except Exception:
-                        pass
+                        raw = bytes(ptr)
+                        if raw:
+                            img_hash = hashlib.md5(raw).hexdigest()
+                            if img_hash == self._last_image_hash:
+                                return
+                            self._last_image_hash = img_hash
+                    except Exception as exc:
+                        logger.debug("image hash error: %s", exc)
+                        # fall through — save without hash dedup
                 path = self.image_store.save_qimage(img)
                 item = ClipboardItem(
                     content_type=TYPE_IMAGE,
