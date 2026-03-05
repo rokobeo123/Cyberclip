@@ -651,29 +651,48 @@ class MainWindow(QMainWindow):
     # ═══════════════════════════════════════════════════
     @pyqtSlot(ClipboardItem)
     def _paste_item(self, item: ClipboardItem):
-        """Copy item to clipboard so user can paste it anywhere."""
+        """Copy item to clipboard, hide window, and inject Ctrl+V into the target app."""
+        if self._paste_busy:
+            return
+
+        self._paste_busy = True
+        self._paste_watchdog.start(8000)
+
         # 1.6 — suppress monitor BEFORE writing to clipboard
         self.monitor.suppress_next()
         self.monitor.pause()
 
-        clipboard = QApplication.clipboard()
+        try:
+            clipboard = QApplication.clipboard()
+            if item.content_type == TYPE_IMAGE and item.image_path and os.path.exists(item.image_path):
+                img = QImage(item.image_path)
+                if not img.isNull():
+                    mime = QMimeData()
+                    mime.setImageData(img)
+                    clipboard.setMimeData(mime)
+                    QApplication.processEvents()
+                    self._paste_item_is_image = True
+                else:
+                    self._paste_busy = False
+                    self._paste_watchdog.stop()
+                    self.monitor.resume()
+                    return
+            else:
+                text = item.text_content
+                if self.settings.strip_formatting:
+                    text = to_plain_text(text)
+                clipboard.setText(text)
+                self._paste_item_is_image = False
+        except Exception:
+            self._paste_busy = False
+            self._paste_watchdog.stop()
+            self.monitor.resume()
+            return
 
-        if item.content_type == TYPE_IMAGE and item.image_path and os.path.exists(item.image_path):
-            img = QImage(item.image_path)
-            if not img.isNull():
-                mime = QMimeData()
-                mime.setImageData(img)
-                clipboard.setMimeData(mime)
-        else:
-            text = item.text_content
-            if self.settings.strip_formatting:
-                text = to_plain_text(text)
-            clipboard.setText(text)
-
-        QTimer.singleShot(500, self.monitor.resume)
-
-        self.status_label.setText(t("copied_ctrlv"))
-        QTimer.singleShot(2000, lambda: self.status_label.setText(t("ready")))
+        # Hide window first so target app can receive focus + Ctrl+V
+        self._animate_hide()
+        settle_ms = 400 if self._paste_item_is_image else 150
+        QTimer.singleShot(settle_ms, self._do_inject_paste)
 
     def _sequential_paste(self):
         try:
