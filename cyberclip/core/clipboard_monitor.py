@@ -432,53 +432,18 @@ class ClipboardMonitor(QObject):
         Try all methods to read a clipboard image.
         Returns True and emits item_captured if successful, False otherwise.
 
-        Order of attempts (most→least reliable for Win+Shift+S):
-        A) Win32 registered PNG/JFIF format bytes  ← primary path for Win+Shift+S
-        B) Qt clipboard.image()                    ← fast for apps that use CF_BITMAP
-        C) PIL ImageGrab.grabclipboard()            ← fallback for CF_DIB sources
+        Order of attempts (mirrors v1.3.4 proven behavior + adds fallbacks):
+        1) Qt clipboard.image()  ← primary: works for Win+Shift+S, screen captures, most apps
+        2) PIL ImageGrab         ← fallback when Qt image is null but CF_DIB/CF_DIBV5 is present
+        3) Win32 registered PNG  ← final: for sources that expose ONLY registered 'PNG' format
         """
         import io as _io
         try:
-            from PIL import Image as PILImage
+            from PIL import Image as PILImage, ImageGrab
         except ImportError:
-            PILImage = None
+            PILImage = ImageGrab = None
 
-        # ── Attempt A: Win32 registered PNG/JFIF (Win+Shift+S / Snipping Tool) ──
-        # Read BEFORE touching Qt clipboard to avoid any Qt clipboard-open interference.
-        if PILImage is not None:
-            for raw_fmt, fmt_name in [(_CF_PNG, "PNG"), (_CF_JFIF, "JFIF")]:
-                if not raw_fmt or not _user32.IsClipboardFormatAvailable(raw_fmt):
-                    continue
-                raw = _read_clipboard_format_bytes(raw_fmt)
-                if not raw or len(raw) < 8:
-                    logger.debug("Attempt A(%s): read returned %s bytes", fmt_name,
-                                 len(raw) if raw else 0)
-                    continue
-                try:
-                    pil_img = PILImage.open(_io.BytesIO(raw))
-                    img_hash = hashlib.md5(raw).hexdigest()
-                    if img_hash == self._last_image_hash:
-                        return True   # duplicate
-                    self._last_image_hash = img_hash
-                    buf = _io.BytesIO()
-                    out = pil_img.convert("RGB") if pil_img.mode not in ("RGB", "RGBA") else pil_img
-                    out.save(buf, "PNG")
-                    path = self.image_store.save_image(buf.getvalue())
-                    item = ClipboardItem(
-                        content_type=TYPE_IMAGE,
-                        image_path=path,
-                        text_content=f"{pil_img.width}\u00d7{pil_img.height}",
-                        created_at=datetime.now().isoformat(),
-                    )
-                    self._detect_source(item)
-                    logger.info("image captured via Win32/%s (%dx%d)", fmt_name,
-                                pil_img.width, pil_img.height)
-                    self.item_captured.emit(item)
-                    return True
-                except Exception as exc:
-                    logger.debug("Attempt A(%s) decode error: %s", fmt_name, exc)
-
-        # ── Attempt B: Qt native QImage ──────────────────────────────────────────
+        # ── Attempt 1: Qt native (v1.3.4 approach — reliable for Win+Shift+S) ───────
         try:
             img = clipboard.image()
             if not img.isNull() and img.width() > 0 and img.height() > 0:
@@ -499,16 +464,16 @@ class ClipboardMonitor(QObject):
                 self.item_captured.emit(item)
                 return True
         except Exception as exc:
-            logger.debug("Attempt B (Qt): %s", exc)
+            logger.debug("Attempt 1 (Qt image): %s", exc)
 
-        # ── Attempt C: PIL ImageGrab (reads CF_DIBv5/CF_DIB) ─────────────────────
-        if PILImage is not None:
+        # ── Attempt 2: PIL ImageGrab (CF_DIBv5/CF_DIB — common for GDI/legacy apps) ─
+        if PILImage is not None and ImageGrab is not None:
             try:
-                from PIL import ImageGrab
                 pil_img = ImageGrab.grabclipboard()
                 if isinstance(pil_img, PILImage.Image):
                     buf = _io.BytesIO()
-                    out = pil_img.convert("RGB") if pil_img.mode not in ("RGB", "RGBA") else pil_img
+                    out = (pil_img.convert("RGB")
+                           if pil_img.mode not in ("RGB", "RGBA") else pil_img)
                     out.save(buf, "PNG")
                     img_data = buf.getvalue()
                     img_hash = hashlib.md5(img_data).hexdigest()
@@ -528,7 +493,41 @@ class ClipboardMonitor(QObject):
                     self.item_captured.emit(item)
                     return True
             except Exception as exc:
-                logger.debug("Attempt C (PIL ImageGrab): %s", exc)
+                logger.debug("Attempt 2 (PIL ImageGrab): %s", exc)
+
+        # ── Attempt 3: Win32 registered PNG/JFIF bytes ───────────────────────────────
+        # For apps that put ONLY a registered 'PNG' format with no CF_DIB synthesis.
+        if PILImage is not None:
+            for raw_fmt, fmt_name in [(_CF_PNG, "PNG"), (_CF_JFIF, "JFIF")]:
+                if not raw_fmt or not _user32.IsClipboardFormatAvailable(raw_fmt):
+                    continue
+                raw = _read_clipboard_format_bytes(raw_fmt)
+                if not raw or len(raw) < 8:
+                    continue
+                try:
+                    pil_img = PILImage.open(_io.BytesIO(raw))
+                    img_hash = hashlib.md5(raw).hexdigest()
+                    if img_hash == self._last_image_hash:
+                        return True   # duplicate
+                    self._last_image_hash = img_hash
+                    buf = _io.BytesIO()
+                    out = (pil_img.convert("RGB")
+                           if pil_img.mode not in ("RGB", "RGBA") else pil_img)
+                    out.save(buf, "PNG")
+                    path = self.image_store.save_image(buf.getvalue())
+                    item = ClipboardItem(
+                        content_type=TYPE_IMAGE,
+                        image_path=path,
+                        text_content=f"{pil_img.width}\u00d7{pil_img.height}",
+                        created_at=datetime.now().isoformat(),
+                    )
+                    self._detect_source(item)
+                    logger.info("image captured via Win32/%s (%dx%d)",
+                                fmt_name, pil_img.width, pil_img.height)
+                    self.item_captured.emit(item)
+                    return True
+                except Exception as exc:
+                    logger.debug("Attempt 3 Win32/%s decode error: %s", fmt_name, exc)
 
         return False   # all attempts failed
 
