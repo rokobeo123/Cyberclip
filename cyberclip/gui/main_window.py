@@ -689,9 +689,17 @@ class MainWindow(QMainWindow):
             self.monitor.resume()
             return
 
-        # Hide immediately (no animation) so Ctrl+V goes to target, not CyberClip.
-        # _animate_hide() takes 200ms; firing at 150ms means CyberClip is still
-        # the foreground window and Ctrl+V lands in our own search box.
+        # Activate target app BEFORE hiding — main thread has foreground authority
+        # here. After self.hide() the background inject thread loses SetForegroundWindow
+        # permission, so we must hand focus to the target while we still can.
+        try:
+            import ctypes
+            ctypes.windll.user32.AllowSetForegroundWindow(0xFFFFFFFF)
+            if self._target_hwnd:
+                from cyberclip.utils.win32_helpers import set_foreground_robust
+                set_foreground_robust(self._target_hwnd)
+        except Exception:
+            pass
         self.hide()
         settle_ms = 400 if self._paste_item_is_image else 200
         QTimer.singleShot(settle_ms, self._do_inject_paste)
